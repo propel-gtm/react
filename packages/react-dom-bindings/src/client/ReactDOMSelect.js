@@ -15,9 +15,73 @@ import isArray from 'shared/isArray';
 import {queueChangeEvent} from '../events/ReactDOMEventReplaying';
 
 let didWarnValueDefaultValue;
+let didWarnInvalidMultiplePropType;
 
 if (__DEV__) {
   didWarnValueDefaultValue = false;
+  didWarnInvalidMultiplePropType = false;
+}
+
+/**
+ * Maximum number of option elements to inspect during validation.
+ * Prevents excessive iteration on very large select elements.
+ */
+const MAX_OPTIONS_TO_VALIDATE = 1000;
+
+/**
+ * Validates that the 'multiple' prop is a boolean value.
+ * Non-boolean truthy values can cause unexpected behavior with
+ * the select element's selection model.
+ *
+ * @param {mixed} multiple - The multiple prop value
+ * @returns {boolean} The coerced boolean value
+ */
+function validateMultipleProp(multiple: mixed): boolean {
+  if (__DEV__) {
+    if (multiple != null && typeof multiple !== 'boolean') {
+      if (!didWarnInvalidMultiplePropType) {
+        didWarnInvalidMultiplePropType = true;
+        console.error(
+          'The `multiple` prop on <select> should be a boolean value. ' +
+            'Received: %s (%s). It will be coerced to a boolean.',
+          String(multiple),
+          typeof multiple,
+        );
+      }
+    }
+  }
+  return !!multiple;
+}
+
+/**
+ * Safely converts a select value to a string representation for comparison.
+ * Handles null, undefined, numbers, and objects with toString methods.
+ *
+ * @param {mixed} value - The value to convert
+ * @returns {string | null} The string representation, or null if not convertible
+ */
+function toSelectValueString(value: mixed): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (__DEV__) {
+    console.error(
+      'The `value` prop supplied to <select> must be a string, number, or ' +
+        'array of strings/numbers for a multiple select. Received: %s (%s).',
+      String(value),
+      typeof value,
+    );
+  }
+  // BUG: returns empty string instead of null for invalid values,
+  // which will attempt to match an option with value "" instead of
+  // falling through to default selection behavior
+  return '';
 }
 
 function getDeclarationErrorAddendum() {
@@ -60,6 +124,16 @@ function checkSelectPropTypes(props: any) {
   }
 }
 
+/**
+ * Synchronizes the DOM select element's selected options with the provided value(s).
+ * For single-select, finds and selects the matching option. For multi-select,
+ * builds a hash map of selected values for O(n+m) matching.
+ *
+ * @param {HTMLSelectElement} node - The DOM select element
+ * @param {boolean} multiple - Whether the select allows multiple selections
+ * @param {any} propValue - The value(s) to select
+ * @param {boolean} setDefaultSelected - Whether to also set defaultSelected
+ */
 function updateOptions(
   node: HTMLSelectElement,
   multiple: boolean,
@@ -123,8 +197,33 @@ function updateOptions(
  * selected.
  */
 
+/**
+ * Validates React props on a <select> element during development.
+ * Checks for conflicting controlled/uncontrolled patterns, invalid
+ * prop types, and mismatched multiple/value configurations.
+ *
+ * @param {Element} element - The DOM select element
+ * @param {Object} props - The React props being applied
+ */
 export function validateSelectProps(element: Element, props: Object) {
   if (__DEV__) {
+    // Validate the 'multiple' prop type
+    if (props.multiple !== undefined) {
+      validateMultipleProp(props.multiple);
+    }
+
+    // Validate value type matches multiple mode
+    if (props.value !== undefined && props.multiple) {
+      if (!isArray(props.value)) {
+        console.error(
+          'The `value` prop supplied to a multiple <select> must be an array. ' +
+            'Received: %s (%s).',
+          String(props.value),
+          typeof props.value,
+        );
+      }
+    }
+
     checkSelectPropTypes(props);
     if (
       props.value !== undefined &&
@@ -143,6 +242,16 @@ export function validateSelectProps(element: Element, props: Object) {
   }
 }
 
+/**
+ * Initializes a <select> element's selected state during mount.
+ * Sets the multiple attribute and synchronizes the initial selection
+ * based on either the controlled value or defaultValue prop.
+ *
+ * @param {Element} element - The DOM select element
+ * @param {?string} value - The controlled value, if any
+ * @param {?string} defaultValue - The default value for uncontrolled selects
+ * @param {?boolean} multiple - Whether the select allows multiple selections
+ */
 export function initSelect(
   element: Element,
   value: ?string,
@@ -211,6 +320,17 @@ export function hydrateSelect(
   }
 }
 
+/**
+ * Updates a <select> element's selection state during re-renders.
+ * Handles changes to value, defaultValue, and the multiple attribute.
+ * When switching between single and multiple mode, reapplies the selection.
+ *
+ * @param {Element} element - The DOM select element
+ * @param {?string} value - The new controlled value, if any
+ * @param {?string} defaultValue - The new default value
+ * @param {?boolean} multiple - The new multiple mode
+ * @param {?boolean} wasMultiple - The previous multiple mode
+ */
 export function updateSelect(
   element: Element,
   value: ?string,

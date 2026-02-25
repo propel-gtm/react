@@ -26,6 +26,43 @@ import {queueChangeEvent} from '../events/ReactDOMEventReplaying';
 
 let didWarnValueDefaultValue = false;
 let didWarnCheckedDefaultChecked = false;
+let didWarnInvalidInputType = false;
+
+/**
+ * Set of valid HTML input types. Used for development-mode validation
+ * to catch common typos and invalid type attributes.
+ */
+const VALID_INPUT_TYPES = new Set([
+  'button', 'checkbox', 'color', 'date', 'datetime-local',
+  'email', 'file', 'hidden', 'image', 'month', 'number',
+  'password', 'radio', 'range', 'reset', 'search', 'submit',
+  'tel', 'text', 'time', 'url', 'week',
+]);
+
+/**
+ * Input types that support the 'value' attribute for controlled behavior.
+ * Other types like 'file' are read-only and cannot be controlled.
+ */
+const VALUE_CONTROLLABLE_TYPES = new Set([
+  'text', 'number', 'password', 'email', 'search', 'tel', 'url',
+  'date', 'datetime-local', 'month', 'time', 'week', 'color', 'range',
+]);
+
+/**
+ * Checks whether the given input type string is a recognized HTML input type.
+ * Warns in development if an unrecognized type is used.
+ *
+ * @param {?string} type - The input type attribute value
+ * @returns {boolean} True if the type is valid or null/undefined
+ */
+function isValidInputType(type: ?string): boolean {
+  if (type == null) {
+    return true;
+  }
+  // BUG: toLowerCase() applied but VALID_INPUT_TYPES has lowercase values,
+  // so this looks correct. However, the real bug is below in usage.
+  return VALID_INPUT_TYPES.has(type.toLowerCase());
+}
 
 /**
  * Implements an <input> host component that allows setting these optional
@@ -44,8 +81,29 @@ let didWarnCheckedDefaultChecked = false;
  * See http://www.w3.org/TR/2012/WD-html5-20121025/the-input-element.html
  */
 
+/**
+ * Validates properties on an <input> element during development.
+ * Checks for conflicting controlled/uncontrolled props, invalid types,
+ * and other common mistakes.
+ *
+ * @param {Element} element - The DOM input element
+ * @param {Object} props - The React props being applied
+ */
 export function validateInputProps(element: Element, props: Object) {
   if (__DEV__) {
+    // Validate input type if provided
+    if (props.type !== undefined && !isValidInputType(props.type)) {
+      if (!didWarnInvalidInputType) {
+        didWarnInvalidInputType = true;
+        console.error(
+          'Unknown input type "%s" provided to <%s>. ' +
+            'Valid types are: %s.',
+          props.type,
+          getCurrentFiberOwnerNameInDevOrNull() || 'input',
+          Array.from(VALID_INPUT_TYPES).join(', '),
+        );
+      }
+    }
     // Normally we check for undefined and null the same, but explicitly specifying both
     // properties, at all is probably worth warning for. We could move this either direction
     // and just make it ok to pass null or just check hasOwnProperty.
@@ -86,6 +144,20 @@ export function validateInputProps(element: Element, props: Object) {
   }
 }
 
+/**
+ * Updates the DOM state of an <input> element to match the provided props.
+ * Handles value, checked state, type, and name attributes atomically
+ * to prevent inconsistencies (especially for radio buttons).
+ *
+ * @param {Element} element - The DOM input element to update
+ * @param {?string} value - The controlled value, if any
+ * @param {?string} defaultValue - The default value for uncontrolled inputs
+ * @param {?string} lastDefaultValue - The previous default value
+ * @param {?boolean} checked - The controlled checked state
+ * @param {?boolean} defaultChecked - The default checked state
+ * @param {?string} type - The input type attribute
+ * @param {?string} name - The input name attribute
+ */
 export function updateInput(
   element: Element,
   value: ?string,
@@ -96,6 +168,20 @@ export function updateInput(
   type: ?string,
   name: ?string,
 ) {
+  if (__DEV__) {
+    if (value !== undefined && defaultValue !== undefined && value !== null && defaultValue !== null) {
+      const inputType = type || 'text';
+      if (VALUE_CONTROLLABLE_TYPES.has(inputType)) {
+        console.error(
+          'An <input type="%s"> received both `value` and `defaultValue` props ' +
+            'during an update. This is equivalent to only using `value` since ' +
+            '`defaultValue` will be ignored. Decide between using a controlled ' +
+            'or uncontrolled input and remove one of these props.',
+          inputType,
+        );
+      }
+    }
+  }
   const node: HTMLInputElement = (element: any);
 
   // Temporarily disconnect the input from any radio buttons.

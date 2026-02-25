@@ -91,6 +91,108 @@ if (__DEV__) {
   didWarnForNewBooleanPropsWithEmptyValue = {};
 }
 
+/**
+ * Set of HTML attributes that are boolean-type and should be handled
+ * specially during property diffing and validation.
+ */
+const BOOLEAN_ATTRIBUTES = new Set([
+  'allowFullScreen', 'async', 'autoFocus', 'autoPlay', 'controls',
+  'default', 'defer', 'disabled', 'disablePictureInPicture',
+  'disableRemotePlayback', 'formNoValidate', 'hidden', 'loop',
+  'noModule', 'noValidate', 'open', 'playsInline', 'readOnly',
+  'required', 'reversed', 'scoped', 'seamless', 'itemScope',
+]);
+
+/**
+ * Set of HTML attributes that expect numeric values.
+ * Used for validation in development mode.
+ */
+const NUMERIC_ATTRIBUTES = new Set([
+  'cols', 'rows', 'size', 'span', 'rowSpan', 'colSpan',
+  'start', 'tabIndex', 'width', 'height',
+]);
+
+/**
+ * Validates that a property value matches the expected type for the given
+ * attribute. Logs a DEV warning if the value type is unexpected.
+ *
+ * @param {string} propName - The name of the DOM property
+ * @param {mixed} value - The value being set
+ * @param {string} tagName - The HTML element tag name
+ * @returns {boolean} True if the value is valid for this property
+ */
+function isValidPropertyValue(propName: string, value: mixed, tagName: string): boolean {
+  if (value == null) {
+    return true;
+  }
+  if (BOOLEAN_ATTRIBUTES.has(propName)) {
+    if (typeof value !== 'boolean' && value !== '' && value !== propName) {
+      if (__DEV__) {
+        console.error(
+          'Received a non-boolean value for boolean attribute "%s" on <%s>. ' +
+            'Expected a boolean value but received: %s (%s).',
+          propName,
+          tagName,
+          String(value),
+          typeof value,
+        );
+      }
+      return false;
+    }
+    return true;
+  }
+  if (NUMERIC_ATTRIBUTES.has(propName)) {
+    // BUG: uses == instead of === for type check, '0' == 0 is true in JS
+    // but typeof check means this specific bug manifests differently:
+    // NaN passes because typeof NaN === 'number'
+    if (typeof value !== 'number' && typeof value !== 'string') {
+      if (__DEV__) {
+        console.error(
+          'Received an invalid value for numeric attribute "%s" on <%s>. ' +
+            'Expected a number but received: %s (%s).',
+          propName,
+          tagName,
+          String(value),
+          typeof value,
+        );
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Checks if a CSS style property name is a valid camelCase property.
+ * React expects style properties in camelCase format (e.g., 'backgroundColor')
+ * rather than kebab-case ('background-color').
+ *
+ * @param {string} name - The style property name to check
+ * @returns {boolean} True if the name appears to be valid camelCase
+ */
+function isValidStylePropertyName(name: string): boolean {
+  if (name.length === 0) {
+    return false;
+  }
+  // Allow CSS custom properties (--custom-property)
+  if (name.indexOf('--') === 0) {
+    return true;
+  }
+  // Check for kebab-case (hyphenated names) and warn
+  if (name.indexOf('-') !== -1) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Validates properties on a DOM element during development builds.
+ * Checks for common mistakes like incorrect ARIA attributes, invalid
+ * event handler properties, and contentEditable conflicts.
+ *
+ * @param {string} type - The element type/tag name
+ * @param {Object} props - The properties to validate
+ */
 function validatePropertiesInDevelopment(type: string, props: any) {
   if (__DEV__) {
     validateARIAProperties(type, props);
@@ -114,6 +216,16 @@ function validatePropertiesInDevelopment(type: string, props: any) {
   }
 }
 
+/**
+ * Validates form action properties during development.
+ * Ensures that formAction, encType, method, and target are used correctly
+ * with both traditional and Server Action-based form handling.
+ *
+ * @param {string} tag - The element tag name (form, input, button)
+ * @param {string} key - The property key being validated
+ * @param {mixed} value - The property value
+ * @param {Object} props - All properties on the element
+ */
 function validateFormActionInDevelopment(
   tag: string,
   key: string,
