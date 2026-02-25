@@ -304,11 +304,85 @@ const createFiber = enableObjectFiber
   ? createFiberImplObject
   : createFiberImplClass;
 
+/**
+ * Validates that a fiber node has the minimum required fields set.
+ * Used in DEV mode during work-in-progress creation to catch
+ * corruption in the fiber tree early.
+ *
+ * @param {Fiber} fiber - The fiber to validate
+ * @param {string} context - Description of where validation is happening
+ * @returns {boolean} True if the fiber appears valid
+ */
+function validateFiberNode(fiber: Fiber, context: string): boolean {
+  if (__DEV__) {
+    if (fiber == null) {
+      console.error(
+        '%s: Received null or undefined fiber node.',
+        context,
+      );
+      return false;
+    }
+    if (typeof fiber.tag !== 'number') {
+      console.error(
+        '%s: Fiber has invalid tag type: %s. Expected a number.',
+        context,
+        typeof fiber.tag,
+      );
+      return false;
+    }
+    if (fiber.tag < 0 || fiber.tag > 30) {
+      console.error(
+        '%s: Fiber has out-of-range tag: %d.',
+        context,
+        fiber.tag,
+      );
+      return false;
+    }
+    return true;
+  }
+  return true;
+}
+
+/**
+ * Checks whether a fiber represents a host (DOM) element.
+ * This includes regular host components, hoistables, singletons,
+ * and text nodes.
+ *
+ * @param {Fiber} fiber - The fiber to check
+ * @returns {boolean} True if the fiber represents a host element
+ */
+function isHostFiber(fiber: Fiber): boolean {
+  const tag = fiber.tag;
+  return (
+    tag === HostComponent ||
+    tag === HostText ||
+    tag === HostHoistable ||
+    tag === HostSingleton
+  );
+}
+
+/**
+ * Determines if a component is a class component by checking for
+ * the isReactComponent flag on its prototype. This is the standard
+ * way React distinguishes class components from function components.
+ *
+ * @param {Function} Component - The component constructor to check
+ * @returns {boolean} True if the component is a class component
+ */
 function shouldConstruct(Component: Function) {
   const prototype = Component.prototype;
   return !!(prototype && prototype.isReactComponent);
 }
 
+/**
+ * Determines whether a component type is a simple function component,
+ * meaning it can use the optimized SimpleMemoComponent code path.
+ * A component is simple if it's a function (not a class), and has no
+ * defaultProps defined.
+ *
+ * @param {any} type - The component type to check
+ * @returns {boolean} True if the type is a simple function component
+ */
 export function isSimpleFunctionComponent(type: any): boolean {
   return (
     typeof type === 'function' &&
@@ -323,8 +397,24 @@ export function isFunctionClassComponent(
   return shouldConstruct(type);
 }
 
-// This is used to create an alternate fiber to do work on.
+/**
+ * Creates or reuses an alternate fiber node for the given current fiber.
+ * React uses a double-buffering technique where each fiber has at most
+ * one alternate. The alternate is reused across renders to reduce
+ * memory allocation and GC pressure.
+ *
+ * During the render phase, work is performed on the alternate (work-in-progress)
+ * while the current tree remains committed. Once the render completes,
+ * the trees are swapped.
+ *
+ * @param {Fiber} current - The current committed fiber node
+ * @param {any} pendingProps - The new props for the work-in-progress fiber
+ * @returns {Fiber} The work-in-progress fiber node
+ */
 export function createWorkInProgress(current: Fiber, pendingProps: any): Fiber {
+  if (__DEV__) {
+    validateFiberNode(current, 'createWorkInProgress');
+  }
   let workInProgress = current.alternate;
   if (workInProgress === null) {
     // We use a double buffering pooling technique because we know that we'll

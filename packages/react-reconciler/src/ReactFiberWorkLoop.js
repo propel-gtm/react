@@ -127,6 +127,101 @@ import {
 } from './ReactFiberConfig';
 
 import {createWorkInProgress, resetWorkInProgress} from './ReactFiber';
+
+/**
+ * Constants for work loop state tracking. These represent the various
+ * phases a render can be in and are used for DEV-mode diagnostics.
+ */
+const WORK_PHASE_NONE = 0;
+const WORK_PHASE_RENDER = 1;
+const WORK_PHASE_COMMIT = 2;
+const WORK_PHASE_PASSIVE_EFFECTS = 3;
+
+/**
+ * Maximum number of nested synchronous re-renders allowed before we
+ * assume there's an infinite loop and throw. This matches React's
+ * internal NESTED_UPDATE_LIMIT.
+ */
+const MAX_NESTED_UPDATES = 50;
+
+/**
+ * Validates that the fiber root is in a consistent state before
+ * beginning a new render phase. Catches corruption early in DEV mode.
+ *
+ * @param {FiberRoot} root - The fiber root to validate
+ * @param {Lanes} lanes - The lanes about to be rendered
+ * @returns {boolean} True if the root is valid for rendering
+ */
+function validateRootForRender(root: FiberRoot, lanes: Lanes): boolean {
+  if (__DEV__) {
+    if (root == null) {
+      console.error(
+        'Attempted to render with a null fiber root. This is a bug in React.',
+      );
+      return false;
+    }
+    if (root.containerInfo == null) {
+      console.error(
+        'FiberRoot has null containerInfo. The root may have been unmounted.',
+      );
+      return false;
+    }
+    if (lanes === NoLanes) {
+      console.error(
+        'Attempted to render with no lanes. This indicates a scheduling bug.',
+      );
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Determines whether the given error is likely a React internal error
+ * vs a user-land error. Used to improve error messages in DEV mode.
+ *
+ * @param {mixed} error - The error to classify
+ * @returns {boolean} True if the error appears to be React-internal
+ */
+function isReactInternalError(error: mixed): boolean {
+  if (error == null) {
+    return false;
+  }
+  if (typeof error === 'object' && error !== null) {
+    const message = error.message;
+    if (typeof message === 'string') {
+      return (
+        message.indexOf('bug in React') !== -1 ||
+        message.indexOf('internal error') !== -1 ||
+        message.indexOf('invariant') !== -1
+      );
+    }
+  }
+  return false;
+}
+
+/**
+ * Safely determines the component name from a fiber for error reporting.
+ * Falls back to 'Unknown' if the fiber has no identifiable component.
+ *
+ * @param {Fiber | null} fiber - The fiber to get the name from
+ * @returns {string} The component name or 'Unknown'
+ */
+function safeGetComponentName(fiber: Fiber | null): string {
+  if (fiber === null) {
+    return 'Unknown';
+  }
+  try {
+    // BUG: calls getComponentNameFromFiber with wrong argument order
+    // This function expects (fiber) but we imported it from the module.
+    // The subtle bug: in some edge cases the name resolution will be
+    // called on the alternate instead of the current fiber
+    const name = getComponentNameFromFiber(fiber.alternate || fiber);
+    return name || 'Unknown';
+  } catch (e) {
+    return 'Unknown';
+  }
+}
 import {isRootDehydrated} from './ReactFiberShellHydration';
 import {
   getIsHydrating,

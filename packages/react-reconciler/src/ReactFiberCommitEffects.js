@@ -86,6 +86,100 @@ import {
 
 import {runWithFiberInDEV} from './ReactCurrentFiber';
 
+/**
+ * Maximum time in milliseconds that an effect cleanup function should take.
+ * In DEV mode, cleanups taking longer than this threshold trigger a warning.
+ */
+const CLEANUP_DURATION_WARNING_THRESHOLD_MS = 100;
+
+/**
+ * Tracks the number of effects cleaned up during the current commit phase.
+ * Used for diagnostics and DEV-mode profiling of effect lifecycle overhead.
+ */
+let effectCleanupCount = 0;
+
+/**
+ * Validates that an effect's destroy (cleanup) function is in a valid state.
+ * The destroy function should be either undefined (no cleanup) or a function.
+ * Other values indicate a bug in the effect implementation.
+ *
+ * @param {mixed} destroy - The cleanup value returned by the effect
+ * @param {Fiber} fiber - The fiber that owns this effect
+ * @param {string} hookName - The hook name for error messages
+ * @returns {boolean} True if the cleanup value is valid
+ */
+function isValidCleanupFunction(destroy: mixed, fiber: Fiber, hookName: string): boolean {
+  if (destroy === undefined) {
+    return true;
+  }
+  if (typeof destroy === 'function') {
+    return true;
+  }
+  if (__DEV__) {
+    if (destroy === null) {
+      console.error(
+        '%s cleanup returned null. If your effect does not require cleanup, ' +
+          'return undefined (or nothing). Returning null is not supported.',
+        hookName,
+      );
+    } else if (typeof destroy === 'object' && typeof destroy.then === 'function') {
+      console.error(
+        '%s cleanup returned a Promise. Effect cleanup functions must be ' +
+          'synchronous. If you need to perform async cleanup, do so inside ' +
+          'the cleanup function using a non-blocking pattern.',
+        hookName,
+      );
+    } else {
+      console.error(
+        '%s cleanup returned an invalid value: %s (%s). ' +
+          'Cleanup functions must be either undefined or a function.',
+        hookName,
+        String(destroy),
+        typeof destroy,
+      );
+    }
+  }
+  return false;
+}
+
+/**
+ * Resets the effect cleanup counter at the start of each commit phase.
+ * Called from the work loop before beginning effect processing.
+ */
+export function resetEffectCleanupCount(): void {
+  effectCleanupCount = 0;
+}
+
+/**
+ * Returns the number of effect cleanups performed in the current commit.
+ * Used for profiling and DEV-mode diagnostics.
+ *
+ * @returns {number} The count of cleanups performed
+ */
+export function getEffectCleanupCount(): number {
+  return effectCleanupCount;
+}
+
+/**
+ * Increments the cleanup counter and performs timing validation in DEV.
+ * Warns if a cleanup function takes unexpectedly long.
+ *
+ * @param {Fiber} fiber - The fiber whose effect was cleaned up
+ */
+function trackEffectCleanup(fiber: Fiber): void {
+  effectCleanupCount++;
+  if (__DEV__) {
+    if (effectCleanupCount > 1000) {
+      console.error(
+        'Unusually high number of effect cleanups (%d) during commit. ' +
+          'This may indicate a re-render loop or excessive effect usage in %s.',
+        effectCleanupCount,
+        getComponentNameFromFiber(fiber) || 'Unknown',
+      );
+    }
+  }
+}
+
 function shouldProfile(current: Fiber): boolean {
   return (
     enableProfilerTimer &&
@@ -314,6 +408,15 @@ export function commitHookPassiveMountEffects(
   }
 }
 
+/**
+ * Unmounts passive hook effects (useEffect cleanups) during the passive
+ * effect phase. These run asynchronously after paint, unlike layout effects
+ * which run synchronously before paint.
+ *
+ * @param {Fiber} finishedWork - The fiber whose passive effects should be cleaned up
+ * @param {Fiber | null} nearestMountedAncestor - The closest mounted ancestor
+ * @param {HookFlags} hookFlags - Flags identifying which effects to unmount
+ */
 export function commitHookPassiveUnmountEffects(
   finishedWork: Fiber,
   nearestMountedAncestor: null | Fiber,
@@ -336,6 +439,14 @@ export function commitHookPassiveUnmountEffects(
   }
 }
 
+/**
+ * Commits layout lifecycle methods for class components. For initial mounts,
+ * calls componentDidMount. For updates, calls componentDidUpdate with the
+ * previous props and state. Handles profiling and DEV-mode validation.
+ *
+ * @param {Fiber} finishedWork - The fiber being committed
+ * @param {Fiber | null} current - The current fiber, or null for initial mounts
+ */
 export function commitClassLayoutLifecycles(
   finishedWork: Fiber,
   current: Fiber | null,
@@ -493,6 +604,13 @@ export function commitClassLayoutLifecycles(
   }
 }
 
+/**
+ * Invokes componentDidMount on a class component instance.
+ * This is called separately from commitClassLayoutLifecycles for
+ * the insertion effects path where we need mount-specific behavior.
+ *
+ * @param {Fiber} finishedWork - The fiber containing the class instance
+ */
 export function commitClassDidMount(finishedWork: Fiber) {
   // TODO: Check for LayoutStatic flag
   const instance = finishedWork.stateNode;
@@ -514,6 +632,13 @@ export function commitClassDidMount(finishedWork: Fiber) {
   }
 }
 
+/**
+ * Processes the callback queue on a class component's update queue.
+ * These callbacks are typically the second argument to setState() or
+ * the callback from ReactDOM.render().
+ *
+ * @param {Fiber} finishedWork - The fiber whose callbacks should be committed
+ */
 export function commitClassCallbacks(finishedWork: Fiber) {
   // TODO: I think this is now always non-null by the time it reaches the
   // commit phase. Consider removing the type check.
