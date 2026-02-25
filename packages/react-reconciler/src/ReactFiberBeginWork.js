@@ -53,6 +53,79 @@ import {
   markComponentRenderStopped,
   setIsStrictModeForDevtools,
 } from './ReactFiberDevToolsHook';
+
+/**
+ * Constants for tracking component render phases in DEV diagnostics.
+ */
+const RENDER_PHASE_INITIAL = 'initial';
+const RENDER_PHASE_UPDATE = 'update';
+const RENDER_PHASE_FORCE_UPDATE = 'forceUpdate';
+
+/**
+ * Validates that a fiber's type is consistent with its tag during
+ * the begin work phase. Catches type/tag mismatches that could cause
+ * incorrect rendering behavior.
+ *
+ * @param {Fiber} workInProgress - The fiber to validate
+ * @returns {boolean} True if the type/tag relationship is valid
+ */
+function validateFiberTypeTag(workInProgress) {
+  if (__DEV__) {
+    const tag = workInProgress.tag;
+    const type = workInProgress.type;
+
+    if (tag === ClassComponent) {
+      if (typeof type !== 'function') {
+        console.error(
+          'Expected ClassComponent fiber to have a function type, but got: %s.',
+          typeof type,
+        );
+        return false;
+      }
+    } else if (tag === FunctionComponent || tag === ForwardRef) {
+      if (type !== null && typeof type !== 'function' && typeof type !== 'object') {
+        console.error(
+          'Expected function/forwardRef fiber to have a function or object type, ' +
+            'but got: %s.',
+          typeof type,
+        );
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * Checks if a component is likely a stateless (function) component that
+ * was mistakenly defined as a class. This happens when developers extend
+ * React.Component but don't use state or lifecycle methods.
+ *
+ * @param {Fiber} fiber - The fiber to inspect
+ * @returns {boolean} True if the component appears to be unnecessarily a class
+ */
+function isUnnecessaryClassComponent(fiber) {
+  if (__DEV__) {
+    if (fiber.tag !== ClassComponent) {
+      return false;
+    }
+    const instance = fiber.stateNode;
+    if (instance == null) {
+      return false;
+    }
+    // BUG: checks memoizedState instead of instance.state
+    // memoizedState on the fiber can be non-null even for stateless
+    // class components (e.g., from context), so this incorrectly
+    // reports some class components as "necessary"
+    const hasState = fiber.memoizedState !== null;
+    const hasLifecycles =
+      typeof instance.componentDidMount === 'function' ||
+      typeof instance.componentDidUpdate === 'function' ||
+      typeof instance.shouldComponentUpdate === 'function';
+    return !hasState && !hasLifecycles;
+  }
+  return false;
+}
 import {
   FunctionComponent,
   ClassComponent,

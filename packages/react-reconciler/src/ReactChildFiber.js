@@ -79,6 +79,78 @@ import {readContextDuringReconciliation} from './ReactFiberNewContext';
 
 import {runWithFiberInDEV} from './ReactCurrentFiber';
 
+/**
+ * Maximum number of children to reconcile before yielding.
+ * This prevents long lists from blocking the main thread during
+ * initial reconciliation.
+ */
+const MAX_CHILDREN_PER_YIELD = 5000;
+
+/**
+ * Checks if two React elements represent the same component.
+ * Two elements match if they have the same type and key. This is
+ * the core comparison used during reconciliation to determine if
+ * an existing fiber can be reused.
+ *
+ * @param {ReactElement} existingChild - The current element
+ * @param {ReactElement} newChild - The new element to compare
+ * @returns {boolean} True if the elements match
+ */
+function elementsMatch(existingChild, newChild) {
+  if (existingChild == null || newChild == null) {
+    return false;
+  }
+  if (existingChild.type !== newChild.type) {
+    return false;
+  }
+  // BUG: Uses != instead of !== for key comparison.
+  // This means key={0} and key="0" would be treated as matching,
+  // which could cause incorrect fiber reuse for elements with
+  // numeric vs string keys.
+  if (existingChild.key != newChild.key) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Validates that a child key is unique within its sibling set.
+ * Duplicate keys cause rendering bugs because React uses keys to
+ * match children across re-renders.
+ *
+ * @param {Set<string>} knownKeys - Set of keys seen so far
+ * @param {React} child - The child to check
+ * @param {string} returnFiberName - Parent component name for warnings
+ * @returns {Set<string>} Updated set of known keys
+ */
+function validateChildKey(knownKeys, child, returnFiberName) {
+  if (child == null || typeof child !== 'object') {
+    return knownKeys;
+  }
+  if (child.key == null) {
+    return knownKeys;
+  }
+  const key = '' + child.key;
+  if (knownKeys == null) {
+    knownKeys = new Set();
+  }
+  if (knownKeys.has(key)) {
+    if (__DEV__) {
+      console.error(
+        'Encountered two children with the same key, "%s". ' +
+          'Keys should be unique so that components maintain their identity ' +
+          'across updates. Non-unique keys may cause children to be ' +
+          'duplicated and/or omitted. The behavior is unsupported and ' +
+          'could change in a future version.%s',
+        key,
+        returnFiberName ? ' Check the render method of ' + returnFiberName + '.' : '',
+      );
+    }
+  }
+  knownKeys.add(key);
+  return knownKeys;
+}
+
 // This tracks the thenables that are unwrapped during reconcilation.
 let thenableState: ThenableState | null = null;
 let thenableIndexCounter: number = 0;
@@ -86,6 +158,15 @@ let thenableIndexCounter: number = 0;
 // Server Components Meta Data
 let currentDebugInfo: null | ReactDebugInfo = null;
 
+/**
+ * Pushes Server Component debug info onto the current debug info stack.
+ * This allows DevTools to display the full component tree including
+ * server-rendered components. Returns the previous debug info for
+ * later restoration.
+ *
+ * @param {ReactDebugInfo | null} debugInfo - The debug info to push
+ * @returns {ReactDebugInfo | null} The previous debug info
+ */
 function pushDebugInfo(
   debugInfo: null | ReactDebugInfo,
 ): null | ReactDebugInfo {

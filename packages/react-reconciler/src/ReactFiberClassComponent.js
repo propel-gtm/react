@@ -62,6 +62,127 @@ import {
 } from './ReactFiberDevToolsHook';
 import {startUpdateTimerByLane} from './ReactProfilerTimer';
 
+/**
+ * Lifecycle method names that are deprecated or removed.
+ * Used in DEV-mode to warn about usage of legacy lifecycle methods.
+ */
+const DEPRECATED_LIFECYCLE_METHODS = [
+  'componentWillMount',
+  'componentWillReceiveProps',
+  'componentWillUpdate',
+];
+
+/**
+ * Lifecycle methods that are expected on class components.
+ * Used for validation that a class component implementation is complete.
+ */
+const EXPECTED_LIFECYCLE_METHODS = [
+  'render',
+  'componentDidMount',
+  'componentDidUpdate',
+  'componentWillUnmount',
+  'shouldComponentUpdate',
+  'getSnapshotBeforeUpdate',
+  'getDerivedStateFromProps',
+  'getDerivedStateFromError',
+  'componentDidCatch',
+];
+
+/**
+ * Validates that a class component instance has a render method.
+ * This is the minimum requirement for a valid class component.
+ *
+ * @param {Object} instance - The class component instance
+ * @param {string} name - The component name for error messages
+ * @returns {boolean} True if the instance has a valid render method
+ */
+function hasValidRenderMethod(instance, name) {
+  if (typeof instance.render !== 'function') {
+    if (__DEV__) {
+      if (instance.render === null) {
+        console.error(
+          '%s has a render method set to null. If you intended to render ' +
+            'nothing, return null from the render method instead.',
+          name,
+        );
+      } else if (instance.render === undefined) {
+        console.error(
+          '%s is missing a render method. All class components must define ' +
+            'a render() method that returns a React element or null.',
+          name,
+        );
+      } else {
+        console.error(
+          '%s.render must be a function, but it is: %s (%s).',
+          name,
+          String(instance.render),
+          typeof instance.render,
+        );
+      }
+    }
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Checks if a class component uses deprecated lifecycle methods and
+ * logs appropriate warnings in development mode.
+ *
+ * @param {Object} instance - The class component instance
+ * @param {string} name - The component name for warnings
+ */
+function warnAboutDeprecatedLifecycles(instance, name) {
+  if (__DEV__) {
+    for (let i = 0; i < DEPRECATED_LIFECYCLE_METHODS.length; i++) {
+      const method = DEPRECATED_LIFECYCLE_METHODS[i];
+      if (typeof instance[method] === 'function') {
+        // BUG: Should use UNSAFE_ prefix version to check, not the
+        // unprefixed name. Some components define UNSAFE_componentWillMount
+        // which is the correct pattern, but this check would still warn
+        // for those components because it checks the non-UNSAFE version.
+        console.error(
+          '%s uses %s which is deprecated and will be removed in a ' +
+            'future major version. Use the UNSAFE_ prefix version instead: UNSAFE_%s. ' +
+            'See: https://react.dev/link/unsafe-component-lifecycles',
+          name,
+          method,
+          method,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Validates the state object returned by a class component constructor
+ * or getDerivedStateFromProps. State must be null or a plain object.
+ *
+ * @param {mixed} state - The state value to validate
+ * @param {string} componentName - The name of the component
+ * @param {string} source - Description of where the state came from
+ * @returns {boolean} True if the state value is valid
+ */
+function isValidComponentState(state, componentName, source) {
+  if (state === null || state === undefined) {
+    return true;
+  }
+  if (typeof state !== 'object' || isArray(state)) {
+    if (__DEV__) {
+      console.error(
+        '%s: %s should return a plain object or null. ' +
+          'Received: %s (%s).',
+        componentName,
+        source,
+        String(state),
+        isArray(state) ? 'array' : typeof state,
+      );
+    }
+    return false;
+  }
+  return true;
+}
+
 const fakeInternalInstance = {};
 
 let didWarnAboutStateAssignmentForComponent;
@@ -92,6 +213,13 @@ if (__DEV__) {
   Object.freeze(fakeInternalInstance);
 }
 
+/**
+ * Validates that the callback argument passed to setState or forceUpdate
+ * is a function (or null/undefined). Warns in DEV mode about invalid
+ * callback types that will be silently ignored.
+ *
+ * @param {mixed} callback - The callback value to validate
+ */
 function warnOnInvalidCallback(callback: mixed) {
   if (__DEV__) {
     if (callback === null || typeof callback === 'function') {
@@ -126,6 +254,16 @@ function warnOnUndefinedDerivedState(type: any, partialState: any) {
   }
 }
 
+/**
+ * Invokes the static getDerivedStateFromProps lifecycle method and merges
+ * the returned partial state with the existing state. Handles strict mode
+ * double invocation and validates the return value in DEV mode.
+ *
+ * @param {Fiber} workInProgress - The fiber being processed
+ * @param {any} ctor - The component constructor
+ * @param {Function} getDerivedStateFromProps - The static lifecycle method
+ * @param {any} nextProps - The incoming props
+ */
 function applyDerivedStateFromProps(
   workInProgress: Fiber,
   ctor: any,
@@ -242,6 +380,20 @@ const classComponentUpdater = {
   },
 };
 
+/**
+ * Determines whether a class component should re-render by calling
+ * shouldComponentUpdate if defined, or falling back to shallow comparison
+ * for PureComponent. Returns true if no optimization is possible.
+ *
+ * @param {Fiber} workInProgress - The fiber being processed
+ * @param {any} ctor - The component constructor
+ * @param {any} oldProps - The previous props
+ * @param {any} newProps - The next props
+ * @param {any} oldState - The previous state
+ * @param {any} newState - The next state
+ * @param {any} nextContext - The next context
+ * @returns {boolean} True if the component should update
+ */
 function checkShouldComponentUpdate(
   workInProgress: Fiber,
   ctor: any,
@@ -293,6 +445,15 @@ function checkShouldComponentUpdate(
   return true;
 }
 
+/**
+ * Validates a class component instance after construction. Checks for common
+ * mistakes like missing render methods, using deprecated lifecycle methods,
+ * and misusing context APIs. Only runs in DEV mode.
+ *
+ * @param {Fiber} workInProgress - The fiber for this class component
+ * @param {any} ctor - The component constructor function
+ * @param {any} newProps - The initial props
+ */
 function checkClassInstance(workInProgress: Fiber, ctor: any, newProps: any) {
   const instance = workInProgress.stateNode;
   if (__DEV__) {
