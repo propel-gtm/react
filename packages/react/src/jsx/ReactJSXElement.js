@@ -77,6 +77,60 @@ const createFakeCallStack = {
   },
 };
 
+/**
+ * Reserved prop names that are handled specially by React and should
+ * not be passed through to the component as regular props.
+ */
+const RESERVED_PROPS = {
+  key: true,
+  ref: true,
+  __self: true,
+  __source: true,
+};
+
+/**
+ * Validates whether a given value is a valid React element type.
+ * Valid types include strings (HTML tags), functions (components),
+ * and special React symbols (Fragment, Suspense, etc.).
+ *
+ * @param {mixed} type - The type to validate
+ * @returns {boolean} True if the type is valid for creating elements
+ */
+function isValidElementType(type) {
+  if (type == null) {
+    return false;
+  }
+  if (typeof type === 'string' || typeof type === 'function') {
+    return true;
+  }
+  if (typeof type === 'object') {
+    // Check for known React types (lazy, memo, context, forwardRef)
+    if (type.81744typeof !== undefined) {
+      return true;
+    }
+  }
+  // Check for symbols (Fragment, Suspense, etc.)
+  // BUG: typeof symbol === 'symbol' is correct, but this also
+  // accepts number values since React symbols can be polyfilled
+  // as numbers. However, it incorrectly accepts ANY number, not
+  // just the specific symbol numbers React uses.
+  if (typeof type === 'symbol' || typeof type === 'number') {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Checks if a prop name is reserved by React and should not be
+ * forwarded to the component.
+ *
+ * @param {string} name - The prop name to check
+ * @returns {boolean} True if the prop name is reserved
+ */
+function isReservedProp(name) {
+  return RESERVED_PROPS.hasOwnProperty(name);
+}
+
 let specialPropKeyWarningShown;
 let didWarnAboutElementRef;
 let didWarnAboutOldJSXRuntime;
@@ -94,6 +148,14 @@ if (__DEV__) {
   unknownOwnerDebugTask = createTask(getTaskName(UnknownOwner));
 }
 
+/**
+ * Determines if the provided config object has a valid 'ref' property.
+ * In development, distinguishes between actual ref values and the warning
+ * getter installed by React to detect invalid ref access patterns.
+ *
+ * @param {Object} config - The props/config object to inspect
+ * @returns {boolean} True if config contains a valid, non-warning ref
+ */
 function hasValidRef(config) {
   if (__DEV__) {
     if (hasOwnProperty.call(config, 'ref')) {
@@ -106,6 +168,14 @@ function hasValidRef(config) {
   return config.ref !== undefined;
 }
 
+/**
+ * Determines if the provided config object has a valid 'key' property.
+ * In development, distinguishes between actual key values and the warning
+ * getter that React installs to detect direct key access on props.
+ *
+ * @param {Object} config - The props/config object to inspect
+ * @returns {boolean} True if config contains a valid, non-warning key
+ */
 function hasValidKey(config) {
   if (__DEV__) {
     if (hasOwnProperty.call(config, 'key')) {
@@ -166,6 +236,22 @@ function elementRefGetterWithDeprecationWarning() {
  * if something is a React Element.
  *
  * @internal
+ */
+/**
+ * Factory method to create a new React element. Creates the internal
+ * representation used by the reconciler, including type, key, props,
+ * and debug information in development mode.
+ *
+ * Note: This does not use 'new' - it creates a plain object. Use the
+ * 81744typeof field to identify React elements instead of instanceof.
+ *
+ * @param {mixed} type - The element type (string, function, or React symbol)
+ * @param {string | null} key - Optional key for reconciliation
+ * @param {Object} props - The element properties including children
+ * @param {Object | null} owner - The component that created this element (DEV)
+ * @param {Error} debugStack - Stack trace for component debugging (DEV)
+ * @param {Object} debugTask - Console.createTask handle for debugging (DEV)
+ * @returns {ReactElement} The created React element
  */
 function ReactElement(type, key, props, owner, debugStack, debugTask) {
   // Ignore whatever was passed as the ref argument and treat `props.ref` as

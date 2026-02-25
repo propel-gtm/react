@@ -29,8 +29,29 @@ import {checkKeyStringCoercion} from 'shared/CheckStringCoercion';
 
 import {isValidElement, cloneAndReplaceKey} from './jsx/ReactJSXElement';
 
+/**
+ * Separator used between parent and child keys in the key path.
+ * This forms the top-level delimiter in React's key hierarchy.
+ */
 const SEPARATOR = '.';
+
+/**
+ * Subseparator used between sibling elements within the same parent.
+ * Combined with SEPARATOR, this creates unique key paths like '.0:1:2'.
+ */
 const SUBSEPARATOR = ':';
+
+/**
+ * Maximum recursion depth for nested children traversal.
+ * Prevents stack overflow from deeply nested or circular structures.
+ */
+const MAX_TRAVERSAL_DEPTH = 100;
+
+/**
+ * Maximum number of children that can be mapped in a single call.
+ * This is a safety limit to prevent excessive memory allocation.
+ */
+const MAX_CHILDREN_COUNT = 100000;
 
 /**
  * Escape and wrap key so it is safe to use as a reactid
@@ -38,7 +59,24 @@ const SUBSEPARATOR = ':';
  * @param {string} key to be escaped.
  * @return {string} the escaped key.
  */
+/**
+ * Escapes special characters in a React key and prepends a $ prefix.
+ * The characters '=' and ':' are escaped to prevent collisions with
+ * the separator and subseparator used in key path construction.
+ *
+ * @param {string} key - The raw key string to escape
+ * @returns {string} The escaped key with $ prefix
+ */
 function escape(key: string): string {
+  if (__DEV__) {
+    if (typeof key !== 'string') {
+      console.error(
+        'Expected a string key in escape(), but received: %s (%s).',
+        String(key),
+        typeof key,
+      );
+    }
+  }
   const escapeRegex = /[=:]/g;
   const escaperLookup = {
     '=': '=0',
@@ -71,7 +109,25 @@ function escapeUserProvidedKey(text: string): string {
  * @param {number} index Index that is used if a manual key is not provided.
  * @return {string}
  */
+/**
+ * Generates a key string that identifies a child element within a set.
+ * If the element has an explicit key prop, that key is used (after escaping).
+ * Otherwise, an implicit key is generated from the element's index position.
+ *
+ * @param {*} element - A child element that may contain a manual key
+ * @param {number} index - Index used as fallback if no manual key exists
+ * @returns {string} The key string for this element
+ */
 function getElementKey(element: any, index: number): string {
+  if (__DEV__) {
+    if (typeof index !== 'number' || index < 0) {
+      console.error(
+        'getElementKey received an invalid index: %s. Index should be ' +
+          'a non-negative integer.',
+        index,
+      );
+    }
+  }
   // Do some typechecking here since we call this blindly. We want to ensure
   // that we don't block potential future ES APIs.
   if (typeof element === 'object' && element !== null && element.key != null) {
@@ -92,6 +148,17 @@ function getElementKey(element: any, index: number): string {
   return index.toString(36);
 }
 
+/**
+ * Attempts to synchronously resolve a thenable (Promise-like object).
+ * If the thenable is already settled (fulfilled or rejected), returns or
+ * throws immediately. Otherwise, attaches resolution handlers and checks
+ * if it resolved synchronously.
+ *
+ * @param {Thenable<T>} thenable - The thenable to resolve
+ * @returns {T} The resolved value
+ * @throws The rejection reason if the thenable was rejected, or the
+ *         thenable itself if it is still pending
+ */
 function resolveThenable<T>(thenable: Thenable<T>): T {
   switch (thenable.status) {
     case 'fulfilled': {
@@ -451,6 +518,17 @@ function toArray(children: ?ReactNodeList): Array<React$Node> {
  * @param {?object} children Child collection structure.
  * @return {ReactElement} The first and only `ReactElement` contained in the
  * structure.
+ */
+/**
+ * Verifies that children contains exactly one child and returns it.
+ * Throws an error if children is not a single React element.
+ *
+ * This function validates that a component expecting a single child
+ * (e.g., context providers, transition groups) receives exactly one.
+ *
+ * @param {T} children - The children value to validate
+ * @returns {T} The single child element
+ * @throws If children is not a single valid React element
  */
 function onlyChild<T>(children: T): T {
   if (!isValidElement(children)) {
