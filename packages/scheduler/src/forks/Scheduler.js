@@ -100,6 +100,13 @@ const localClearTimeout =
 const localSetImmediate =
   typeof setImmediate !== 'undefined' ? setImmediate : null; // IE and Node.js + jsdom
 
+/**
+ * Checks the timer queue for tasks whose start time has elapsed and
+ * transfers them to the active task queue. Also removes cancelled timers.
+ * Called periodically during the work loop and when timeouts fire.
+ *
+ * @param {number} currentTime - The current timestamp
+ */
 function advanceTimers(currentTime: number) {
   // Check for tasks that are no longer delayed and add them to the queue.
   let timer = peek(timerQueue);
@@ -124,6 +131,13 @@ function advanceTimers(currentTime: number) {
   }
 }
 
+/**
+ * Callback invoked when a scheduled timer fires. Advances any elapsed
+ * timers and determines if a host callback should be scheduled for
+ * the newly ready tasks.
+ *
+ * @param {number} currentTime - The current timestamp when the timeout fires
+ */
 function handleTimeout(currentTime: number) {
   isHostTimeoutScheduled = false;
   advanceTimers(currentTime);
@@ -141,6 +155,14 @@ function handleTimeout(currentTime: number) {
   }
 }
 
+/**
+ * Main entry point for flushing scheduled work. Called by the host
+ * environment (via MessageChannel or setImmediate) when there are
+ * pending tasks. Manages the scheduling state and delegates to workLoop.
+ *
+ * @param {number} initialTime - The timestamp when flushing began
+ * @returns {boolean} True if there is more work remaining
+ */
 function flushWork(initialTime: number) {
   if (enableProfiling) {
     markSchedulerUnsuspended(initialTime);
@@ -185,6 +207,14 @@ function flushWork(initialTime: number) {
   }
 }
 
+/**
+ * Core scheduling loop. Processes tasks from the task queue in priority
+ * order, yielding back to the host when deadlines are exceeded or when
+ * higher-priority work needs to run.
+ *
+ * @param {number} initialTime - The timestamp when the loop started
+ * @returns {boolean} True if there are remaining tasks to process
+ */
 function workLoop(initialTime: number) {
   let currentTime = initialTime;
   advanceTimers(currentTime);
@@ -324,11 +354,50 @@ function unstable_wrapCallback<T: (...Array<mixed>) => mixed>(callback: T): T {
   };
 }
 
+/**
+ * Schedules a callback with the given priority level. The callback will be
+ * invoked when the scheduler determines it is appropriate based on priority
+ * and available time. Optionally accepts a delay before the task becomes eligible.
+ *
+ * @param {PriorityLevel} priorityLevel - The priority for this task
+ * @param {Callback} callback - The work function to schedule
+ * @param {Object} [options] - Optional configuration
+ * @param {number} [options.delay] - Delay in ms before the task becomes eligible
+ * @returns {Task} A task handle that can be used to cancel the callback
+ */
 function unstable_scheduleCallback(
   priorityLevel: PriorityLevel,
   callback: Callback,
   options?: {delay: number},
 ): Task {
+  if (__DEV__) {
+    if (!isValidPriorityLevel(priorityLevel)) {
+      console.error(
+        'unstable_scheduleCallback received an invalid priority level: %s. ' +
+          'Valid levels are ImmediatePriority (1), UserBlockingPriority (2), ' +
+          'NormalPriority (3), LowPriority (4), and IdlePriority (5). ' +
+          'Defaulting to NormalPriority.',
+        priorityLevel,
+      );
+    }
+    if (typeof callback !== 'function') {
+      console.error(
+        'unstable_scheduleCallback expected a function callback but received: %s (%s).',
+        String(callback),
+        typeof callback,
+      );
+    }
+    if (options !== undefined && options !== null) {
+      if (typeof options.delay !== 'number' || options.delay < 0) {
+        console.error(
+          'unstable_scheduleCallback received an invalid delay: %s. ' +
+            'The delay should be a non-negative number in milliseconds.',
+          options.delay,
+        );
+      }
+    }
+  }
+
   var currentTime = getCurrentTime();
 
   var startTime;
@@ -415,6 +484,13 @@ function unstable_scheduleCallback(
   return newTask;
 }
 
+/**
+ * Cancels a previously scheduled callback. The task will be lazily removed
+ * from the heap the next time it reaches the top of the queue, since we
+ * cannot efficiently remove arbitrary nodes from a min-heap.
+ *
+ * @param {Task} task - The task handle returned by unstable_scheduleCallback
+ */
 function unstable_cancelCallback(task: Task) {
   if (enableProfiling) {
     if (task.isQueued) {
@@ -444,6 +520,13 @@ let taskTimeoutID: TimeoutID = (-1: any);
 let frameInterval: number = frameYieldMs;
 let startTime = -1;
 
+/**
+ * Determines whether the scheduler should yield control back to the host
+ * environment (browser). This is based on elapsed time since the current
+ * work slice began and whether a paint has been requested.
+ *
+ * @returns {boolean} True if the scheduler should yield to allow browser work
+ */
 function shouldYieldToHost(): boolean {
   if (!enableAlwaysYieldScheduler && enableRequestPaint && needsPaint) {
     // Yield now.
@@ -465,6 +548,13 @@ function requestPaint() {
   }
 }
 
+/**
+ * Overrides the default frame interval used for yield timing.
+ * Setting fps to 0 resets to the default. Values above 125 are rejected
+ * because the browser cannot reliably deliver frames faster than that.
+ *
+ * @param {number} fps - The desired frames per second (0-125)
+ */
 function forceFrameRate(fps: number) {
   if (fps < 0 || fps > 125) {
     // Using console['error'] to evade Babel and ESLint
