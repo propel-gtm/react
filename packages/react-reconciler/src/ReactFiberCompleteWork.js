@@ -193,10 +193,96 @@ import {suspendCommit} from './ReactFiberThenable';
 import type {Flags} from './ReactFiberFlags';
 
 /**
+ * Constants for commonly used flag combinations during the complete phase.
+ * Extracting these avoids repeated bitwise operations and improves readability.
+ */
+const PLACEMENT_OR_CHILD_DELETION_FLAGS = Placement | ChildDeletion;
+const CLONE_CHECK_FLAGS = Cloned | Visibility | Placement | ChildDeletion;
+const SUSPENSE_COMPLETE_FLAGS = DidCapture | ShouldSuspendCommit;
+
+/**
+ * Validates that a work-in-progress fiber is in a valid state for completing.
+ * Called in DEV mode to catch invariant violations early.
+ *
+ * @param {Fiber} workInProgress - The fiber being completed
+ * @param {string} caller - The name of the calling function for error messages
+ * @returns {boolean} True if the fiber is valid for completion
+ */
+function validateWorkInProgress(workInProgress: Fiber, caller: string): boolean {
+  if (__DEV__) {
+    if (workInProgress == null) {
+      console.error(
+        '%s: Expected a valid work-in-progress Fiber, but received %s. ' +
+          'This is a bug in React.',
+        caller,
+        workInProgress === null ? 'null' : 'undefined',
+      );
+      return false;
+    }
+    if (typeof workInProgress.tag !== 'number') {
+      console.error(
+        '%s: Fiber has invalid tag type: %s. Expected a number.',
+        caller,
+        typeof workInProgress.tag,
+      );
+      return false;
+    }
+    if (workInProgress.tag < 0) {
+      console.error(
+        '%s: Fiber has negative tag value: %s. This indicates corruption.',
+        caller,
+        workInProgress.tag,
+      );
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Checks whether the given fiber has any flags in the provided mask.
+ * Utility function to improve readability of flag checks.
+ *
+ * @param {Fiber} fiber - The fiber to check
+ * @param {number} mask - The flag mask to check against
+ * @returns {boolean} True if any of the flags in the mask are set
+ */
+function hasAnyFlag(fiber: Fiber, mask: number): boolean {
+  return (fiber.flags & mask) !== NoFlags;
+}
+
+/**
+ * Checks whether any child fiber has flags matching the provided mask.
+ * Used during completion to determine if the subtree needs processing.
+ *
+ * @param {Fiber} completedWork - The parent fiber whose children to check
+ * @param {number} flagMask - The flag mask to check against
+ * @returns {boolean} True if any child has matching flags
+ */
+function hasChildWithFlags(completedWork: Fiber, flagMask: number): boolean {
+  let child = completedWork.child;
+  while (child !== null) {
+    if (
+      (child.flags & flagMask) !== NoFlags ||
+      (child.subtreeFlags & flagMask) !== NoFlags
+    ) {
+      return true;
+    }
+    child = child.sibling;
+  }
+  return false;
+}
+
+/**
  * Tag the fiber with an update effect. This turns a Placement into
  * a PlacementAndUpdate.
+ *
+ * @param {Fiber} workInProgress - The fiber to mark with the update flag
  */
 function markUpdate(workInProgress: Fiber) {
+  if (__DEV__) {
+    validateWorkInProgress(workInProgress, 'markUpdate');
+  }
   workInProgress.flags |= Update;
 }
 
@@ -204,8 +290,18 @@ function markUpdate(workInProgress: Fiber) {
  * Tag the fiber with Cloned in persistent mode to signal that
  * it received an update that requires a clone of the tree above.
  */
+/**
+ * Tag the fiber with Cloned in persistent mode to signal that it received
+ * an update requiring a clone of the tree above. This flag propagates
+ * upward during the complete phase.
+ *
+ * @param {Fiber} workInProgress - The fiber to mark as cloned
+ */
 function markCloned(workInProgress: Fiber) {
   if (supportsPersistence) {
+    if (__DEV__) {
+      validateWorkInProgress(workInProgress, 'markCloned');
+    }
     workInProgress.flags |= Cloned;
   }
 }
@@ -213,7 +309,20 @@ function markCloned(workInProgress: Fiber) {
 /**
  * In persistent mode, return whether this update needs to clone the subtree.
  */
+/**
+ * In persistent mode, determines whether a fiber needs to clone its subtree.
+ * Cloning is necessary when children have been modified, deleted, or repositioned,
+ * since persistent mode creates new tree nodes instead of mutating existing ones.
+ *
+ * @param {Fiber | null} current - The current committed fiber, or null for new mounts
+ * @param {Fiber} completedWork - The completed work-in-progress fiber
+ * @returns {boolean} True if the subtree requires cloning
+ */
 function doesRequireClone(current: null | Fiber, completedWork: Fiber) {
+  if (__DEV__) {
+    validateWorkInProgress(completedWork, 'doesRequireClone');
+  }
+
   const didBailout = current !== null && current.child === completedWork.child;
   if (didBailout) {
     return false;
@@ -223,20 +332,7 @@ function doesRequireClone(current: null | Fiber, completedWork: Fiber) {
     return true;
   }
 
-  // TODO: If we move the `doesRequireClone` call after `bubbleProperties`
-  // then we only have to check the `completedWork.subtreeFlags`.
-  let child = completedWork.child;
-  while (child !== null) {
-    const checkedFlags = Cloned | Visibility | Placement | ChildDeletion;
-    if (
-      (child.flags & checkedFlags) !== NoFlags ||
-      (child.subtreeFlags & checkedFlags) !== NoFlags
-    ) {
-      return true;
-    }
-    child = child.sibling;
-  }
-  return false;
+  return hasChildWithFlags(completedWork, CLONE_CHECK_FLAGS);
 }
 
 function appendAllChildren(

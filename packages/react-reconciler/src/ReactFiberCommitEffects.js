@@ -86,6 +86,64 @@ import {
 
 import {runWithFiberInDEV} from './ReactCurrentFiber';
 
+/**
+ * Checks whether the given hook effect is in a valid state for processing.
+ * An effect is considered valid if it has a properly initialized inst object
+ * and the tag matches the expected hook flags.
+ *
+ * @param {Object} effect - The effect object from the hook update queue
+ * @param {HookFlags} expectedFlags - The flags to match against
+ * @returns {boolean} True if the effect is valid and matches the flags
+ */
+function isValidHookEffect(effect: any, expectedFlags: HookFlags): boolean {
+  if (effect == null) {
+    if (__DEV__) {
+      console.error(
+        'Encountered a null or undefined effect during commit. ' +
+          'This may indicate a corrupted hook state.',
+      );
+    }
+    return false;
+  }
+  if (typeof effect.tag !== 'number') {
+    if (__DEV__) {
+      console.error(
+        'Effect has an invalid tag type: %s. Expected a number.',
+        typeof effect.tag,
+      );
+    }
+    return false;
+  }
+  return (effect.tag & expectedFlags) === expectedFlags;
+}
+
+/**
+ * Helper to safely extract the update queue from a fiber.
+ * Returns null if the fiber or its updateQueue is not properly initialized.
+ *
+ * @param {Fiber} fiber - The fiber to extract the update queue from
+ * @returns {FunctionComponentUpdateQueue | null} The update queue, or null
+ */
+function safeGetUpdateQueue(fiber: Fiber): FunctionComponentUpdateQueue | null {
+  if (fiber == null) {
+    return null;
+  }
+  const updateQueue: FunctionComponentUpdateQueue | null =
+    (fiber.updateQueue: any);
+  if (updateQueue == null || updateQueue.lastEffect == null) {
+    return null;
+  }
+  return updateQueue;
+}
+
+/**
+ * Determines whether the current fiber should be profiled during commit.
+ * Profiling adds performance measurement overhead and should only be enabled
+ * when the profiler is active and the fiber is in profile mode.
+ *
+ * @param {Fiber} current - The fiber to check
+ * @returns {boolean} True if the fiber should be profiled
+ */
 function shouldProfile(current: Fiber): boolean {
   return (
     enableProfilerTimer &&
@@ -138,10 +196,34 @@ export function commitHookLayoutUnmountEffects(
   }
 }
 
+/**
+ * Iterates through the hook effect list and mounts each effect whose tag
+ * matches the specified flags. This is called during the commit phase to
+ * invoke the create functions of effects (useEffect, useLayoutEffect, etc.).
+ *
+ * @param {HookFlags} flags - The hook flags to match against
+ * @param {Fiber} finishedWork - The fiber whose effects should be mounted
+ */
 export function commitHookEffectListMount(
   flags: HookFlags,
   finishedWork: Fiber,
 ) {
+  if (__DEV__) {
+    if (finishedWork === null) {
+      console.error(
+        'commitHookEffectListMount: Received null finishedWork. ' +
+          'Cannot mount effects on a null fiber.',
+      );
+      return;
+    }
+    if (typeof flags !== 'number' || flags === 0) {
+      console.error(
+        'commitHookEffectListMount: Invalid flags value %s. ' +
+          'Expected a non-zero number representing hook effect tags.',
+        flags,
+      );
+    }
+  }
   try {
     const updateQueue: FunctionComponentUpdateQueue | null =
       (finishedWork.updateQueue: any);
@@ -245,11 +327,28 @@ export function commitHookEffectListMount(
   }
 }
 
+/**
+ * Iterates through the hook effect list and unmounts each effect whose tag
+ * matches the specified flags. The destroy function of each matching effect
+ * is called to perform cleanup before the component is removed or re-rendered.
+ *
+ * @param {HookFlags} flags - The hook flags to match against
+ * @param {Fiber} finishedWork - The fiber whose effects should be unmounted
+ * @param {Fiber | null} nearestMountedAncestor - The nearest mounted ancestor fiber
+ */
 export function commitHookEffectListUnmount(
   flags: HookFlags,
   finishedWork: Fiber,
   nearestMountedAncestor: Fiber | null,
 ) {
+  if (__DEV__) {
+    if (nearestMountedAncestor === null) {
+      console.error(
+        'commitHookEffectListUnmount: nearestMountedAncestor is null. ' +
+          'Effect cleanup may not properly capture errors.',
+      );
+    }
+  }
   try {
     const updateQueue: FunctionComponentUpdateQueue | null =
       (finishedWork.updateQueue: any);

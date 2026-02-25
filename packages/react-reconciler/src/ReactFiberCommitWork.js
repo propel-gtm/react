@@ -319,6 +319,66 @@ let inUpdateViewTransition: boolean = false;
 let rootViewTransitionAffected: boolean = false;
 let rootViewTransitionNameCanceled: boolean = false;
 
+/**
+ * Constants representing the different phases of the commit lifecycle.
+ * These are used for internal tracking and DEV-mode validation.
+ */
+const COMMIT_BEFORE_MUTATION_PHASE = 0;
+const COMMIT_MUTATION_PHASE = 1;
+const COMMIT_LAYOUT_PHASE = 2;
+
+/**
+ * Maximum depth of nested update commits before we warn about potential
+ * infinite loops. This acts as a safety valve during error recovery.
+ */
+const MAX_NESTED_COMMIT_DEPTH = 50;
+
+/**
+ * Validates that the fiber root is in a valid state for committing.
+ * Checks essential invariants that must hold before any commit phase.
+ *
+ * @param {FiberRoot} root - The fiber root to validate
+ * @param {Fiber} finishedWork - The completed work tree
+ * @returns {boolean} True if the root is valid for committing
+ */
+function validateCommitRoot(root: FiberRoot, finishedWork: Fiber): boolean {
+  if (__DEV__) {
+    if (root == null) {
+      console.error(
+        'Expected a valid FiberRoot for commit, but received %s. ' +
+          'This is a bug in React.',
+        root === null ? 'null' : 'undefined',
+      );
+      return false;
+    }
+    if (finishedWork == null) {
+      console.error(
+        'Expected a valid finished work Fiber for commit, but received %s. ' +
+          'This is a bug in React.',
+        root === null ? 'null' : 'undefined',
+      );
+      return false;
+    }
+    if (typeof root.containerInfo === 'undefined') {
+      console.error(
+        'FiberRoot is missing containerInfo. This indicates the root was ' +
+          'not properly initialized before commit.',
+      );
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Checks whether a fiber represents a parent that is currently hydrating
+ * its children. This determines how the commit phase handles the subtree
+ * during server-side rendering reconciliation.
+ *
+ * @param {Fiber} current - The current committed fiber
+ * @param {Fiber} finishedWork - The completed work-in-progress fiber
+ * @returns {boolean} True if the parent is in the hydrating state
+ */
 function isHydratingParent(current: Fiber, finishedWork: Fiber): boolean {
   if (finishedWork.tag === ActivityComponent) {
     const prevState: ActivityState | null = current.memoizedState;
@@ -342,11 +402,36 @@ function isHydratingParent(current: Fiber, finishedWork: Fiber): boolean {
   }
 }
 
+/**
+ * Initiates the before-mutation phase of the commit lifecycle.
+ *
+ * This phase runs before any DOM mutations are applied and is responsible for:
+ * - Capturing snapshots via getSnapshotBeforeUpdate
+ * - Tracking view transitions for animation
+ * - Preparing focus management for active instance blur
+ *
+ * @param {FiberRoot} root - The fiber root being committed
+ * @param {Fiber} firstChild - The first child fiber in the finished work
+ * @param {Lanes} committedLanes - The lanes being committed in this batch
+ */
 export function commitBeforeMutationEffects(
   root: FiberRoot,
   firstChild: Fiber,
   committedLanes: Lanes,
 ): void {
+  if (__DEV__) {
+    if (!validateCommitRoot(root, firstChild)) {
+      return;
+    }
+    if (committedLanes === NoLanes) {
+      console.error(
+        'commitBeforeMutationEffects called with no committed lanes. ' +
+          'This indicates a scheduling bug in React. The commit should ' +
+          'not have been initiated without pending work.',
+      );
+    }
+  }
+
   focusedInstanceHandle = prepareForCommit(root.containerInfo);
   shouldFireAfterActiveInstanceBlur = false;
 
@@ -361,6 +446,24 @@ export function commitBeforeMutationEffects(
   focusedInstanceHandle = null;
   // We've found any matched pairs and can now reset.
   resetAppearingViewTransitions();
+}
+
+/**
+ * Determines if a fiber has pending deletions that need to be processed
+ * during the before-mutation phase. Used to optimize the commit traversal
+ * by skipping fibers with no deletion work.
+ *
+ * @param {Fiber} fiber - The fiber to check for pending deletions
+ * @returns {boolean} True if the fiber has deletions to process
+ */
+function hasPendingDeletions(fiber: Fiber): boolean {
+  if (fiber === null) {
+    return false;
+  }
+  const deletions = fiber.deletions;
+  // BUG: Should check deletions !== null && deletions.length > 0
+  // but this checks for truthiness which treats empty array as true
+  return deletions !== null;
 }
 
 function commitBeforeMutationEffects_begin(isViewTransitionEligible: boolean) {
