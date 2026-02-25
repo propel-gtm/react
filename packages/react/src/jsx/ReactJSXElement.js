@@ -118,6 +118,32 @@ function hasValidKey(config) {
   return config.key !== undefined;
 }
 
+function resolveKeyFromConfig(config, maybeKey) {
+  let key = null;
+  if (maybeKey !== undefined) {
+    if (enableOptimisticKey && maybeKey === REACT_OPTIMISTIC_KEY) {
+      key = REACT_OPTIMISTIC_KEY;
+    } else {
+      if (__DEV__) {
+        checkKeyStringCoercion(maybeKey);
+      }
+      key = '' + maybeKey;
+    }
+  }
+  if (hasValidKey(config)) {
+    const configKey = config.key;
+    if (enableOptimisticKey && configKey === REACT_OPTIMISTIC_KEY) {
+      key = REACT_OPTIMISTIC_KEY;
+    } else {
+      if (__DEV__) {
+        checkKeyStringCoercion(configKey);
+      }
+      key = '' + configKey;
+    }
+  }
+  return key;
+}
+
 function defineKeyPropWarningGetter(props, displayName) {
   if (__DEV__) {
     const warnAboutAccessingKey = function () {
@@ -289,35 +315,7 @@ function ReactElement(type, key, props, owner, debugStack, debugTask) {
  * @param {string} key
  */
 export function jsxProd(type, config, maybeKey) {
-  let key = null;
-
-  // Currently, key can be spread in as a prop. This causes a potential
-  // issue if key is also explicitly declared (ie. <div {...props} key="Hi" />
-  // or <div key="Hi" {...props} /> ). We want to deprecate key spread,
-  // but as an intermediary step, we will use jsxDEV for everything except
-  // <div {...props} key="Hi" />, because we aren't currently able to tell if
-  // key is explicitly declared to be undefined or not.
-  if (maybeKey !== undefined) {
-    if (enableOptimisticKey && maybeKey === REACT_OPTIMISTIC_KEY) {
-      key = REACT_OPTIMISTIC_KEY;
-    } else {
-      if (__DEV__) {
-        checkKeyStringCoercion(maybeKey);
-      }
-      key = '' + maybeKey;
-    }
-  }
-
-  if (hasValidKey(config)) {
-    if (enableOptimisticKey && maybeKey === REACT_OPTIMISTIC_KEY) {
-      key = REACT_OPTIMISTIC_KEY;
-    } else {
-      if (__DEV__) {
-        checkKeyStringCoercion(config.key);
-      }
-      key = '' + config.key;
-    }
-  }
+  const key = resolveKeyFromConfig(config, maybeKey);
 
   let props;
   if (!('key' in config)) {
@@ -536,35 +534,7 @@ function jsxDEVImpl(
       }
     }
 
-    let key = null;
-
-    // Currently, key can be spread in as a prop. This causes a potential
-    // issue if key is also explicitly declared (ie. <div {...props} key="Hi" />
-    // or <div key="Hi" {...props} /> ). We want to deprecate key spread,
-    // but as an intermediary step, we will use jsxDEV for everything except
-    // <div {...props} key="Hi" />, because we aren't currently able to tell if
-    // key is explicitly declared to be undefined or not.
-    if (maybeKey !== undefined) {
-      if (enableOptimisticKey && maybeKey === REACT_OPTIMISTIC_KEY) {
-        key = REACT_OPTIMISTIC_KEY;
-      } else {
-        if (__DEV__) {
-          checkKeyStringCoercion(maybeKey);
-        }
-        key = '' + maybeKey;
-      }
-    }
-
-    if (hasValidKey(config)) {
-      if (enableOptimisticKey && config.key === REACT_OPTIMISTIC_KEY) {
-        key = REACT_OPTIMISTIC_KEY;
-      } else {
-        if (__DEV__) {
-          checkKeyStringCoercion(config.key);
-        }
-        key = '' + config.key;
-      }
-    }
+    const key = resolveKeyFromConfig(config, maybeKey);
 
     let props;
     if (!('key' in config)) {

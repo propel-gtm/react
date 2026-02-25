@@ -64,6 +64,19 @@ function escapeUserProvidedKey(text: string): string {
   return text.replace(userProvidedKeyEscapeRegex, '$&/');
 }
 
+function shouldInvokeCallbackForChild(children: ?ReactNodeList, type: string): boolean {
+  if (children === null) return true;
+  if (type === 'undefined' || type === 'boolean') return true;
+  if (type === 'bigint' || type === 'string' || type === 'number') return true;
+  if (type === 'object') {
+    const $$typeof = (children: any).$$typeof;
+    if ($$typeof === REACT_ELEMENT_TYPE || $$typeof === REACT_PORTAL_TYPE) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Generate a key string that identifies a element within a set.
  *
@@ -170,20 +183,11 @@ function mapIntoArray(
 
   if (children === null) {
     invokeCallback = true;
-  } else {
-    switch (type) {
-      case 'bigint':
-      case 'string':
-      case 'number':
-        invokeCallback = true;
-        break;
-      case 'object':
-        switch ((children: any).$$typeof) {
-          case REACT_ELEMENT_TYPE:
-          case REACT_PORTAL_TYPE:
-            invokeCallback = true;
-            break;
-          case REACT_LAZY_TYPE:
+  } else if (shouldInvokeCallbackForChild(children, type)) {
+    invokeCallback = true;
+  } else if (type === 'object') {
+    switch ((children: any).$$typeof) {
+      case REACT_LAZY_TYPE:
             const payload = (children: any)._payload;
             const init = (children: any)._init;
             return mapIntoArray(
@@ -193,7 +197,8 @@ function mapIntoArray(
               nameSoFar,
               callback,
             );
-        }
+      default:
+        break;
     }
   }
 

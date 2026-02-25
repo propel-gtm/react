@@ -21,6 +21,13 @@ export function memo<Props>(
         type === null ? 'null' : typeof type,
       );
     }
+    if (compare !== undefined && typeof compare !== 'function') {
+      console.error(
+        'memo: The second argument must be a function or undefined. ' +
+          'Instead received: %s',
+        typeof compare,
+      );
+    }
   }
   const elementType = {
     $$typeof: REACT_MEMO_TYPE,

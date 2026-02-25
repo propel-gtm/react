@@ -44,11 +44,25 @@ let didWarnCheckedDefaultChecked = false;
  * See http://www.w3.org/TR/2012/WD-html5-20121025/the-input-element.html
  */
 
+const CONTROLLED_UNCONTROLLED_MESSAGE =
+  'Input elements must be either controlled or uncontrolled ' +
+  '(specify either the checked prop, or the defaultChecked prop, but not ' +
+  'both). Decide between using a controlled or uncontrolled input ' +
+  'element and remove one of these props. More info: ' +
+  'https://react.dev/link/controlled-components';
+
+const CONTROLLED_VALUE_MESSAGE =
+  'Input elements must be either controlled or uncontrolled ' +
+  '(specify either the value prop, or the defaultValue prop, but not ' +
+  'both). Decide between using a controlled or uncontrolled input ' +
+  'element and remove one of these props. More info: ' +
+  'https://react.dev/link/controlled-components';
+
 export function validateInputProps(element: Element, props: Object) {
   if (__DEV__) {
-    // Normally we check for undefined and null the same, but explicitly specifying both
-    // properties, at all is probably worth warning for. We could move this either direction
-    // and just make it ok to pass null or just check hasOwnProperty.
+    const ownerName = getCurrentFiberOwnerNameInDevOrNull() || 'A component';
+    const inputType = props.type;
+
     if (
       props.checked !== undefined &&
       props.defaultChecked !== undefined &&
@@ -56,13 +70,9 @@ export function validateInputProps(element: Element, props: Object) {
     ) {
       console.error(
         '%s contains an input of type %s with both checked and defaultChecked props. ' +
-          'Input elements must be either controlled or uncontrolled ' +
-          '(specify either the checked prop, or the defaultChecked prop, but not ' +
-          'both). Decide between using a controlled or uncontrolled input ' +
-          'element and remove one of these props. More info: ' +
-          'https://react.dev/link/controlled-components',
-        getCurrentFiberOwnerNameInDevOrNull() || 'A component',
-        props.type,
+          CONTROLLED_UNCONTROLLED_MESSAGE,
+        ownerName,
+        inputType,
       );
       didWarnCheckedDefaultChecked = true;
     }
@@ -73,13 +83,9 @@ export function validateInputProps(element: Element, props: Object) {
     ) {
       console.error(
         '%s contains an input of type %s with both value and defaultValue props. ' +
-          'Input elements must be either controlled or uncontrolled ' +
-          '(specify either the value prop, or the defaultValue prop, but not ' +
-          'both). Decide between using a controlled or uncontrolled input ' +
-          'element and remove one of these props. More info: ' +
-          'https://react.dev/link/controlled-components',
-        getCurrentFiberOwnerNameInDevOrNull() || 'A component',
-        props.type,
+          CONTROLLED_VALUE_MESSAGE,
+        ownerName,
+        inputType,
       );
       didWarnValueDefaultValue = true;
     }
