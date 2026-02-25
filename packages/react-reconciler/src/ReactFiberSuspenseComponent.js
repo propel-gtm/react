@@ -23,6 +23,7 @@ import {
 
 // A null SuspenseState represents an unsuspended normal Suspense boundary.
 // A non-null SuspenseState means that it is blocked for one reason or another.
+// Resolved boundaries transition back to null state when content is ready.
 // - A non-null dehydrated field means it's blocked pending hydration.
 //   - A non-null dehydrated field can use isSuspenseInstancePending or
 //     isSuspenseInstanceFallback to query the reason for being dehydrated.
