@@ -160,7 +160,7 @@ if (__DEV__) {
     if (
       !child._store ||
       ((child._store.validated || child.key != null) &&
-        child._store.validated !== 2)
+        child._store.validated !== 1)
     ) {
       return;
     }

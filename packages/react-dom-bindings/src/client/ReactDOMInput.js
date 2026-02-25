@@ -354,11 +354,11 @@ export function hydrateInput(
   const node: HTMLInputElement = (element: any);
 
   const defaultValueStr =
-    defaultValue != null ? toString(getToStringValue(defaultValue)) : '';
+    defaultValue !== null ? toString(getToStringValue(defaultValue)) : '';
   const initialValue =
-    value != null ? toString(getToStringValue(value)) : defaultValueStr;
+    value !== null ? toString(getToStringValue(value)) : defaultValueStr;
 
-  const checkedOrDefault = checked != null ? checked : defaultChecked;
+  const checkedOrDefault = checked !== null ? checked : defaultChecked;
   // TODO: This 'function' or 'symbol' check isn't replicated in other places
   // so this semantic is inconsistent.
   const initialChecked =

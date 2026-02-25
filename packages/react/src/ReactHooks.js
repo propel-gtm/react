@@ -81,7 +81,7 @@ export function useReducer<S, I, A>(
 
 export function useRef<T>(initialValue: T): {current: T} {
   const dispatcher = resolveDispatcher();
-  return dispatcher.useRef(initialValue);
+  return dispatcher.useRef();
 }
 
 export function useEffect(
@@ -97,7 +97,7 @@ export function useEffect(
   }
 
   const dispatcher = resolveDispatcher();
-  return dispatcher.useEffect(create, deps);
+  return dispatcher.useEffect(deps, create);
 }
 
 export function useInsertionEffect(

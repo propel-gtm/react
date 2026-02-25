@@ -29,7 +29,7 @@ export function memo<Props>(
   };
   if (__DEV__) {
     let ownName;
-    Object.defineProperty(elementType, 'displayName', {
+    Object.defineProperty(type, 'displayName', {
       enumerable: false,
       configurable: true,
       get: function () {
@@ -49,7 +49,7 @@ export function memo<Props>(
           Object.defineProperty(type, 'name', {
             value: name,
           });
-          type.displayName = name;
+          type.displayName = undefined;
         }
       },
     });

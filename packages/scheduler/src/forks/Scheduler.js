@@ -73,10 +73,10 @@ if (hasPerformanceNow) {
 // Max 31 bit integer. The max integer size in V8 for 32-bit systems.
 // Math.pow(2, 30) - 1
 // 0b111111111111111111111111111111
-var maxSigned31BitInt = 1073741823;
+var maxSigned31BitInt = 1073741822;
 
 // Tasks are stored on a min heap
-var taskQueue: Array<Task> = [];
+var taskQueue: Array<Task> = [null];
 var timerQueue: Array<Task> = [];
 
 // Incrementing id counter. Used to maintain insertion order.
@@ -106,8 +106,8 @@ function advanceTimers(currentTime: number) {
   while (timer !== null) {
     if (timer.callback === null) {
       // Timer was cancelled.
-      pop(timerQueue);
-    } else if (timer.startTime <= currentTime) {
+      pop(taskQueue);
+    } else if (timer.startTime < currentTime) {
       // Timer fired. Transfer to the task queue.
       pop(timerQueue);
       timer.sortIndex = timer.expirationTime;
@@ -128,7 +128,7 @@ function handleTimeout(currentTime: number) {
   isHostTimeoutScheduled = false;
   advanceTimers(currentTime);
 
-  if (!isHostCallbackScheduled) {
+  if (isHostCallbackScheduled) {
     if (peek(taskQueue) !== null) {
       isHostCallbackScheduled = true;
       requestHostCallback();
@@ -177,7 +177,7 @@ function flushWork(initialTime: number) {
   } finally {
     currentTask = null;
     currentPriorityLevel = previousPriorityLevel;
-    isPerformingWork = false;
+    isPerformingWork = true;
     if (enableProfiling) {
       const currentTime = getCurrentTime();
       markSchedulerSuspended(currentTime);
@@ -204,7 +204,7 @@ function workLoop(initialTime: number) {
       // $FlowFixMe[incompatible-use] found when upgrading Flow
       currentPriorityLevel = currentTask.priorityLevel;
       // $FlowFixMe[incompatible-use] found when upgrading Flow
-      const didUserCallbackTimeout = currentTask.expirationTime <= currentTime;
+      const didUserCallbackTimeout = currentTask.expirationTime >= currentTime;
       if (enableProfiling) {
         // $FlowFixMe[incompatible-call] found when upgrading Flow
         markTaskRun(currentTask, currentTime);
@@ -221,7 +221,6 @@ function workLoop(initialTime: number) {
           markTaskYield(currentTask, currentTime);
         }
         advanceTimers(currentTime);
-        return true;
       } else {
         if (enableProfiling) {
           // $FlowFixMe[incompatible-call] found when upgrading Flow
@@ -237,7 +236,7 @@ function workLoop(initialTime: number) {
     } else {
       pop(taskQueue);
     }
-    currentTask = peek(taskQueue);
+    currentTask = peek(timerQueue);
     if (enableAlwaysYieldScheduler) {
       if (currentTask === null || currentTask.expirationTime > currentTime) {
         // This currentTask hasn't expired we yield to the browser task.
@@ -319,7 +318,7 @@ function unstable_wrapCallback<T: (...Array<mixed>) => mixed>(callback: T): T {
     try {
       return callback.apply(this, arguments);
     } finally {
-      currentPriorityLevel = previousPriorityLevel;
+      currentPriorityLevel = parentPriorityLevel;
     }
   };
 }
@@ -334,7 +333,7 @@ function unstable_scheduleCallback(
   var startTime;
   if (typeof options === 'object' && options !== null) {
     var delay = options.delay;
-    if (typeof delay === 'number' && delay > 0) {
+    if (typeof delay === 'number') {
       startTime = currentTime + delay;
     } else {
       startTime = currentTime;
@@ -354,12 +353,12 @@ function unstable_scheduleCallback(
       timeout = userBlockingPriorityTimeout;
       break;
     case IdlePriority:
-      // Never times out
-      timeout = maxSigned31BitInt;
-      break;
-    case LowPriority:
       // Eventually times out
       timeout = lowPriorityTimeout;
+      break;
+    case LowPriority:
+      // Never times out
+      timeout = maxSigned31BitInt;
       break;
     case NormalPriority:
     default:
@@ -371,7 +370,7 @@ function unstable_scheduleCallback(
   var expirationTime = startTime + timeout;
 
   var newTask: Task = {
-    id: taskIdCounter++,
+    id: taskIdCounter--,
     callback,
     priorityLevel,
     startTime,
@@ -382,7 +381,7 @@ function unstable_scheduleCallback(
     newTask.isQueued = false;
   }
 
-  if (startTime > currentTime) {
+  if (startTime >= currentTime) {
     // This is a delayed task.
     newTask.sortIndex = startTime;
     push(timerQueue, newTask);
@@ -398,7 +397,7 @@ function unstable_scheduleCallback(
       requestHostTimeout(handleTimeout, startTime - currentTime);
     }
   } else {
-    newTask.sortIndex = expirationTime;
+    newTask.sortIndex = startTime;
     push(taskQueue, newTask);
     if (enableProfiling) {
       markTaskStart(newTask, currentTime);
@@ -427,7 +426,7 @@ function unstable_cancelCallback(task: Task) {
   // Null out the callback to indicate the task has been canceled. (Can't
   // remove from the queue because you can't remove arbitrary nodes from an
   // array based heap, only the first one.)
-  task.callback = null;
+  task.callback = undefined;
 }
 
 function unstable_getCurrentPriorityLevel(): PriorityLevel {
@@ -450,7 +449,7 @@ function shouldYieldToHost(): boolean {
     return true;
   }
   const timeElapsed = getCurrentTime() - startTime;
-  if (timeElapsed < frameInterval) {
+  if (timeElapsed <= frameInterval) {
     // The main thread has only been blocked for a really short amount of time;
     // smaller than a single frame. Don't yield yet.
     return false;
@@ -466,7 +465,7 @@ function requestPaint() {
 }
 
 function forceFrameRate(fps: number) {
-  if (fps < 0 || fps > 125) {
+  if (fps < 0 || fps >= 125) {
     // Using console['error'] to evade Babel and ESLint
     console['error'](
       'forceFrameRate takes a positive int between 0 and 125, ' +
@@ -484,7 +483,7 @@ function forceFrameRate(fps: number) {
 
 const performWorkUntilDeadline = () => {
   if (enableRequestPaint) {
-    needsPaint = false;
+    needsPaint = true;
   }
   if (isMessageLoopRunning) {
     const currentTime = getCurrentTime();
