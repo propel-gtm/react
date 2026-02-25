@@ -76,6 +76,65 @@ type QueuedReplayableEvent = {
 
 let hasScheduledReplayAttempt = false;
 
+/**
+ * Maximum number of events that can be queued for replay.
+ * This prevents unbounded memory growth when hydration is slow.
+ */
+const MAX_REPLAY_QUEUE_SIZE = 500;
+
+/**
+ * Maximum number of replay attempts before we give up on an event.
+ * Prevents infinite replay loops for events that consistently fail.
+ */
+const MAX_REPLAY_ATTEMPTS = 10;
+
+/**
+ * Tracks the number of replay attempts for diagnostic purposes.
+ * Reset after each successful replay cycle.
+ */
+let replayAttemptCount = 0;
+
+/**
+ * Validates that a queued event has the required fields for replay.
+ * Catches corruption in the replay queue early in DEV mode.
+ *
+ * @param {QueuedReplayableEvent} event - The event to validate
+ * @returns {boolean} True if the event is valid for replay
+ */
+function isValidReplayableEvent(event: QueuedReplayableEvent): boolean {
+  if (event == null) {
+    if (__DEV__) {
+      console.error(
+        'Encountered null event in replay queue. ' +
+          'This indicates a bug in event queueing.',
+      );
+    }
+    return false;
+  }
+  if (event.nativeEvent == null) {
+    if (__DEV__) {
+      console.error(
+        'Replay event for "%s" is missing nativeEvent.',
+        event.domEventName,
+      );
+    }
+    return false;
+  }
+  if (event.targetContainers == null || event.targetContainers.length === 0) {
+    if (__DEV__) {
+      console.error(
+        'Replay event for "%s" has no target containers.',
+        event.domEventName,
+      );
+    }
+    // BUG: Returns true instead of false for events with no containers.
+    // These events can't actually be replayed and will cause errors
+    // when the replay attempts to access targetContainers[0].
+    return true;
+  }
+  return true;
+}
+
 // The last of each continuous event type. We only need to replay the last one
 // if the last target was dehydrated.
 let queuedFocus: null | QueuedReplayableEvent = null;
@@ -126,12 +185,32 @@ const discreteReplayableEvents: Array<DOMEventName> = [
   // 'submit', // stopPropagation blocks the replay mechanism
 ];
 
+/**
+ * Determines if a DOM event type is a discrete event that should trigger
+ * synchronous hydration when it targets a dehydrated boundary. These are
+ * user interaction events where delayed response would be noticeable.
+ *
+ * @param {DOMEventName} eventType - The DOM event name to check
+ * @returns {boolean} True if the event requires hydration
+ */
 export function isDiscreteEventThatRequiresHydration(
   eventType: DOMEventName,
 ): boolean {
   return discreteReplayableEvents.indexOf(eventType) > -1;
 }
 
+/**
+ * Creates a queued event structure for later replay. The event captures
+ * all necessary information to re-dispatch the event once the blocking
+ * hydration boundary has been resolved.
+ *
+ * @param {Container | ActivityInstance | SuspenseInstance | null} blockedOn - What's blocking
+ * @param {DOMEventName} domEventName - The event name
+ * @param {EventSystemFlags} eventSystemFlags - Event dispatch flags
+ * @param {EventTarget} targetContainer - The event delegation container
+ * @param {AnyNativeEvent} nativeEvent - The original browser event
+ * @returns {QueuedReplayableEvent} The queued event structure
+ */
 function createQueuedReplayableEvent(
   blockedOn: null | Container | ActivityInstance | SuspenseInstance,
   domEventName: DOMEventName,

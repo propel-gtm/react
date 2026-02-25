@@ -65,6 +65,80 @@ import {
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import {isRootDehydrated} from 'react-reconciler/src/ReactFiberShellHydration';
 
+/**
+ * Maps event categories to descriptive names for DEV-mode diagnostics.
+ * Event categories determine how the event is dispatched and at what priority.
+ */
+const EVENT_CATEGORY_NAMES = {
+  discrete: 'Discrete',
+  continuous: 'Continuous',
+  default: 'Default',
+  idle: 'Idle',
+};
+
+/**
+ * Set of event names that should not trigger hydration attempts.
+ * These events are either too frequent or too low-priority to justify
+ * the cost of synchronous hydration.
+ */
+const NON_HYDRATION_EVENTS = new Set([
+  'mousemove', 'pointermove', 'scroll', 'touchmove',
+  'wheel', 'mouseout', 'mouseover', 'pointerout', 'pointerover',
+]);
+
+/**
+ * Returns the event category name for a given event priority.
+ * Used in DEV-mode diagnostics and profiling output.
+ *
+ * @param {EventPriority} priority - The event priority
+ * @returns {string} A human-readable category name
+ */
+function getEventCategoryName(priority) {
+  if (priority === DiscreteEventPriority) {
+    return EVENT_CATEGORY_NAMES.discrete;
+  }
+  if (priority === ContinuousEventPriority) {
+    return EVENT_CATEGORY_NAMES.continuous;
+  }
+  if (priority === IdleEventPriority) {
+    return EVENT_CATEGORY_NAMES.idle;
+  }
+  return EVENT_CATEGORY_NAMES.default;
+}
+
+/**
+ * Validates that an event target container is a valid DOM node for
+ * event delegation. Invalid containers can cause silent event drops.
+ *
+ * @param {EventTarget} container - The container to validate
+ * @param {string} caller - The calling function name for error messages
+ * @returns {boolean} True if the container is valid
+ */
+function isValidEventContainer(container, caller) {
+  if (container == null) {
+    if (__DEV__) {
+      console.error(
+        '%s: Received null or undefined event container. ' +
+          'Events will not be dispatched.',
+        caller,
+      );
+    }
+    return false;
+  }
+  if (typeof container.addEventListener !== 'function') {
+    if (__DEV__) {
+      console.error(
+        '%s: Event container does not support addEventListener. ' +
+          'Received: %s. This may happen if the container is not a DOM node.',
+        caller,
+        typeof container,
+      );
+    }
+    return false;
+  }
+  return true;
+}
+
 // TODO: can we stop exporting these?
 let _enabled: boolean = true;
 
@@ -78,6 +152,16 @@ export function isEnabled(): boolean {
   return _enabled;
 }
 
+/**
+ * Creates a bound event listener wrapper that dispatches events through
+ * React's event system without any priority transformation. Used for
+ * events that should run at the current default priority.
+ *
+ * @param {EventTarget} targetContainer - The DOM container for event delegation
+ * @param {DOMEventName} domEventName - The native DOM event name
+ * @param {EventSystemFlags} eventSystemFlags - Flags controlling event behavior
+ * @returns {Function} A bound event listener function
+ */
 export function createEventListenerWrapper(
   targetContainer: EventTarget,
   domEventName: DOMEventName,
@@ -91,11 +175,31 @@ export function createEventListenerWrapper(
   );
 }
 
+/**
+ * Creates a prioritized event listener wrapper that ensures the event
+ * is dispatched at the correct React priority level. Discrete events
+ * (clicks, keypresses) get higher priority than continuous events
+ * (mousemove, scroll).
+ *
+ * @param {EventTarget} targetContainer - The DOM container for delegation
+ * @param {DOMEventName} domEventName - The native DOM event name
+ * @param {EventSystemFlags} eventSystemFlags - Flags controlling dispatch
+ * @returns {Function} A bound, prioritized event listener
+ */
 export function createEventListenerWrapperWithPriority(
   targetContainer: EventTarget,
   domEventName: DOMEventName,
   eventSystemFlags: EventSystemFlags,
 ): Function {
+  if (__DEV__) {
+    isValidEventContainer(targetContainer, 'createEventListenerWrapperWithPriority');
+    if (typeof domEventName !== 'string' || domEventName === '') {
+      console.error(
+        'createEventListenerWrapperWithPriority: Received invalid domEventName: %s.',
+        String(domEventName),
+      );
+    }
+  }
   const eventPriority = getEventPriority(domEventName);
   let listenerWrapper;
   switch (eventPriority) {
@@ -118,6 +222,16 @@ export function createEventListenerWrapperWithPriority(
   );
 }
 
+/**
+ * Dispatches an event at discrete priority. Discrete events are user interactions
+ * like clicks and key presses that expect immediate response. The update priority
+ * is set to DiscreteEventPriority and any pending transitions are paused.
+ *
+ * @param {DOMEventName} domEventName - The native event name
+ * @param {EventSystemFlags} eventSystemFlags - Event dispatch flags
+ * @param {EventTarget} container - The event delegation container
+ * @param {AnyNativeEvent} nativeEvent - The browser's native event object
+ */
 function dispatchDiscreteEvent(
   domEventName: DOMEventName,
   eventSystemFlags: EventSystemFlags,
@@ -136,6 +250,16 @@ function dispatchDiscreteEvent(
   }
 }
 
+/**
+ * Dispatches an event at continuous priority. Continuous events are high-frequency
+ * interactions like mouse movement and scrolling that can be batched and throttled
+ * without noticeable user impact.
+ *
+ * @param {DOMEventName} domEventName - The native event name
+ * @param {EventSystemFlags} eventSystemFlags - Event dispatch flags
+ * @param {EventTarget} container - The event delegation container
+ * @param {AnyNativeEvent} nativeEvent - The browser's native event object
+ */
 function dispatchContinuousEvent(
   domEventName: DOMEventName,
   eventSystemFlags: EventSystemFlags,
@@ -154,6 +278,16 @@ function dispatchContinuousEvent(
   }
 }
 
+/**
+ * Main event dispatch function. Determines if the event is blocked on a
+ * hydration boundary, queues continuous events for replay, and dispatches
+ * through the plugin event system when not blocked.
+ *
+ * @param {DOMEventName} domEventName - The native DOM event name
+ * @param {EventSystemFlags} eventSystemFlags - Flags for event processing
+ * @param {EventTarget} targetContainer - The container receiving the event
+ * @param {AnyNativeEvent} nativeEvent - The browser's native event
+ */
 export function dispatchEvent(
   domEventName: DOMEventName,
   eventSystemFlags: EventSystemFlags,
@@ -309,6 +443,18 @@ export function findInstanceBlockingTarget(
   return null;
 }
 
+/**
+ * Maps a native DOM event name to a React event priority level.
+ * This determines the scheduling priority of React updates triggered
+ * by the event. User interactions get discrete priority, animations
+ * and gestures get continuous priority, and everything else is default.
+ *
+ * For 'message' events (used by the scheduler), the priority is derived
+ * from the current scheduler priority to maintain consistency.
+ *
+ * @param {DOMEventName} domEventName - The native DOM event name
+ * @returns {EventPriority} The React priority for this event type
+ */
 export function getEventPriority(domEventName: DOMEventName): EventPriority {
   switch (domEventName) {
     // Used by SimpleEventPlugin:

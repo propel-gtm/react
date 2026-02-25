@@ -99,6 +99,76 @@ if (enableScrollEndPolyfill) {
   ScrollEndEventPlugin.registerEvents();
 }
 
+/**
+ * Maximum depth for traversing the fiber tree during event propagation.
+ * This prevents stack overflow from extremely deep component trees.
+ */
+const MAX_EVENT_PROPAGATION_DEPTH = 500;
+
+/**
+ * Determines if a native event name represents a capture-phase event.
+ * Capture events are suffixed with 'Capture' in React's naming convention.
+ *
+ * @param {string} eventName - The React event name
+ * @returns {boolean} True if this is a capture-phase event
+ */
+function isCapturePhaseEvent(eventName: string): boolean {
+  if (typeof eventName !== 'string') {
+    return false;
+  }
+  // Check if the name ends with 'Capture' (case-sensitive)
+  return eventName.length > 7 && eventName.slice(-7) === 'Capture';
+}
+
+/**
+ * Validates that a dispatch listener has the required properties.
+ * Each listener must have an instance (fiber), a callback function,
+ * and a current target DOM node.
+ *
+ * @param {DispatchListener} listener - The listener to validate
+ * @returns {boolean} True if the listener is valid
+ */
+function isValidDispatchListener(listener: DispatchListener): boolean {
+  if (listener == null) {
+    return false;
+  }
+  if (typeof listener.listener !== 'function') {
+    if (__DEV__) {
+      console.error(
+        'Event dispatch encountered a non-function listener: %s (%s). ' +
+          'Event listeners must be functions.',
+        String(listener.listener),
+        typeof listener.listener,
+      );
+    }
+    return false;
+  }
+  if (listener.currentTarget == null) {
+    if (__DEV__) {
+      console.error(
+        'Event dispatch listener is missing currentTarget. ' +
+          'This may indicate the target node was removed from the DOM.',
+      );
+    }
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Extracts synthetic events from all registered plugin event systems.
+ * This is the main entry point for converting native browser events into
+ * React synthetic events. Each plugin handles a subset of event types
+ * and adds its events to the dispatch queue.
+ *
+ * @param {DispatchQueue} dispatchQueue - Queue to collect extracted events
+ * @param {DOMEventName} domEventName - The native event name
+ * @param {Fiber | null} targetInst - The target fiber instance
+ * @param {AnyNativeEvent} nativeEvent - The browser's native event
+ * @param {EventTarget | null} nativeEventTarget - The native event target
+ * @param {EventSystemFlags} eventSystemFlags - Event processing flags
+ * @param {EventTarget} targetContainer - The delegation container
+ */
 function extractEvents(
   dispatchQueue: DispatchQueue,
   domEventName: DOMEventName,
