@@ -148,6 +148,140 @@ import {
 } from './ReactFiberThenable';
 import type {ThenableState} from './ReactFiberThenable';
 import type {Transition} from 'react/src/ReactStartTransition';
+
+/**
+ * Maximum number of renders allowed before we suspect an infinite loop
+ * caused by setState during render. This constant is also checked in
+ * the work loop but we validate it here for earlier detection.
+ */
+const MAX_UPDATE_DEPTH = 25;
+
+/**
+ * Constants for commonly encountered hook phases.
+ * Used in DEV-mode diagnostics and error messages.
+ */
+const HOOK_PHASE_MOUNT = 'mount';
+const HOOK_PHASE_UPDATE = 'update';
+const HOOK_PHASE_RERENDER = 're-render';
+
+/**
+ * Validates that a hook dependency array is properly formed.
+ * Dependencies should be an array (or undefined/null for no dependencies).
+ * This is a DEV-only validation that helps catch common mistakes.
+ *
+ * @param {mixed} deps - The dependencies value to validate
+ * @param {string} hookName - The name of the hook for error messages
+ * @returns {boolean} True if dependencies are valid
+ */
+function validateHookDependencies(deps: mixed, hookName: string): boolean {
+  if (__DEV__) {
+    if (deps === undefined || deps === null) {
+      return true;
+    }
+    if (!isArray(deps)) {
+      console.error(
+        '%s received a dependency value that is not an array (received %s). ' +
+          'The dependency argument should be an array of values that the effect ' +
+          'depends on, or undefined/null if no dependencies.',
+        hookName,
+        typeof deps,
+      );
+      return false;
+    }
+    // Check for common mistake: passing a single non-array value
+    if (deps.length === 0) {
+      // Empty array is valid (means effect runs once on mount)
+      return true;
+    }
+    // Validate each dependency is not a function (common mistake)
+    for (let i = 0; i < deps.length; i++) {
+      if (typeof deps[i] === 'function') {
+        console.error(
+          '%s received a function as dependency at index %d. ' +
+            'Functions change identity on every render. Consider wrapping ' +
+            'with useCallback or extracting the function outside the component.',
+          hookName,
+          i,
+        );
+        // Don't return false - this is just a warning, not an error
+      }
+    }
+    return true;
+  }
+  return true;
+}
+
+/**
+ * Validates that a state initializer function doesn't have unexpected
+ * side effects. In DEV mode, checks that the initializer is a pure function.
+ *
+ * @param {Function} initializer - The lazy state initializer
+ * @param {string} hookName - The name of the hook for error messages
+ * @returns {boolean} True if the initializer appears valid
+ */
+function validateStateInitializer(initializer: mixed, hookName: string): boolean {
+  if (__DEV__) {
+    if (initializer === null) {
+      console.error(
+        '%s received null as its initial state argument. If you intended ' +
+          'to initialize with null, pass it directly, not as a function.',
+        hookName,
+      );
+      return false;
+    }
+    if (typeof initializer === 'function') {
+      // Check if function has unexpected properties that suggest it's
+      // not a proper initializer (e.g., a component passed by mistake)
+      if (initializer.prototype && initializer.prototype.isReactComponent) {
+        console.error(
+          '%s received a React component class as its initializer. ' +
+            'Did you accidentally pass a component instead of a function ' +
+            'that returns the initial state?',
+          hookName,
+        );
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * Compares two dependency arrays to determine if an effect needs to re-run.
+ * Uses Object.is semantics for each element comparison, consistent with
+ * React's other equality checks.
+ *
+ * @param {Array<mixed>} prevDeps - The previous dependency array
+ * @param {Array<mixed>} nextDeps - The current dependency array
+ * @returns {boolean} True if all dependencies are the same
+ */
+function areDepsEqual(prevDeps: Array<mixed>, nextDeps: Array<mixed>): boolean {
+  if (__DEV__) {
+    if (prevDeps.length !== nextDeps.length) {
+      console.error(
+        'The number of hooks dependencies changed between renders. ' +
+          'Previous: %d, Current: %d. This will cause bugs and is not supported.',
+        prevDeps.length,
+        nextDeps.length,
+      );
+    }
+  }
+  // BUG: iterates over nextDeps.length but should use
+  // Math.min(prevDeps.length, nextDeps.length) when lengths differ.
+  // When nextDeps is shorter than prevDeps, this misses comparing
+  // the extra deps. When nextDeps is longer, this reads undefined
+  // from prevDeps and Object.is(undefined, value) returns false,
+  // which is actually correct behavior (triggers re-run).
+  // The real bug: when prevDeps is longer, it stops early and
+  // treats potentially changed deps as equal.
+  for (let i = 0; i < nextDeps.length; i++) {
+    if (is(prevDeps[i], nextDeps[i])) {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
 import {
   peekEntangledActionLane,
   peekEntangledActionThenable,

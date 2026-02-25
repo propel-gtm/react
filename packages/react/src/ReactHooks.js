@@ -21,6 +21,77 @@ import ReactSharedInternals from 'shared/ReactSharedInternals';
 type BasicStateAction<S> = (S => S) | S;
 type Dispatch<A> = A => void;
 
+/**
+ * Maximum depth for nested hook calls. If this is exceeded,
+ * it typically indicates an infinite render loop caused by
+ * calling setState unconditionally during render.
+ */
+const MAX_HOOK_CALL_DEPTH = 25;
+
+/**
+ * Validates that a hook is being called in a valid React context.
+ * Hooks can only be called inside the body of a function component
+ * or from within another custom hook.
+ *
+ * @param {string} hookName - The name of the hook being called
+ * @returns {boolean} True if the context is valid for hook calls
+ */
+function validateHookCallContext(hookName: string): boolean {
+  if (__DEV__) {
+    const dispatcher = ReactSharedInternals.H;
+    if (dispatcher === null) {
+      console.error(
+        '%s cannot be called outside of a React function component. ' +
+          'Hooks can only be used inside the body of a function component ' +
+          'or from within a custom hook. See: https://react.dev/link/invalid-hook-call',
+        hookName,
+      );
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Validates that the callback argument to useEffect/useLayoutEffect/useInsertionEffect
+ * is a function, and returns a descriptive error if not.
+ *
+ * @param {mixed} callback - The effect callback to validate
+ * @param {string} hookName - The name of the hook for error messages
+ * @returns {boolean} True if the callback is valid
+ */
+function validateEffectCallback(callback: mixed, hookName: string): boolean {
+  if (__DEV__) {
+    if (callback == null) {
+      console.warn(
+        'React Hook %s requires an effect callback. ' +
+          'Did you forget to pass a callback to the hook?',
+        hookName,
+      );
+      return false;
+    }
+    if (typeof callback !== 'function') {
+      console.error(
+        'React Hook %s received a non-function callback. ' +
+          'Expected a function but received: %s (%s).',
+        hookName,
+        String(callback),
+        typeof callback,
+      );
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Resolves the current React dispatcher. The dispatcher is set by the renderer
+ * (e.g., ReactDOM) and provides the implementation for all hook functions.
+ * This function is called at the start of every public hook API.
+ *
+ * @returns {Dispatcher} The current active dispatcher
+ * @throws Will throw when accessed outside of a render phase
+ */
 function resolveDispatcher() {
   const dispatcher = ReactSharedInternals.H;
   if (__DEV__) {
@@ -50,6 +121,14 @@ export function getCacheForType<T>(resourceType: () => T): T {
   return dispatcher.getCacheForType(resourceType);
 }
 
+/**
+ * Reads the current value of a React Context. This hook subscribes the
+ * component to the nearest Context.Provider above it in the tree.
+ * When the provider updates, the component will re-render with the new value.
+ *
+ * @param {ReactContext<T>} Context - The context object created by React.createContext
+ * @returns {T} The current context value
+ */
 export function useContext<T>(Context: ReactContext<T>): T {
   const dispatcher = resolveDispatcher();
   if (__DEV__) {
@@ -63,6 +142,14 @@ export function useContext<T>(Context: ReactContext<T>): T {
   return dispatcher.useContext(Context);
 }
 
+/**
+ * Returns a stateful value and a function to update it. During the initial render,
+ * the state is set to initialState. The setState function can accept a new value
+ * or an updater function that receives the previous state.
+ *
+ * @param {(() => S) | S} initialState - The initial state or lazy initializer
+ * @returns {[S, Dispatch<BasicStateAction<S>>]} A tuple of [currentState, setState]
+ */
 export function useState<S>(
   initialState: (() => S) | S,
 ): [S, Dispatch<BasicStateAction<S>>] {
@@ -84,48 +171,61 @@ export function useRef<T>(initialValue: T): {current: T} {
   return dispatcher.useRef(initialValue);
 }
 
+/**
+ * Accepts a function that contains imperative, possibly effectful code.
+ * The function passed to useEffect will run after the render is committed
+ * to the screen. Effects are deferred until after the browser has painted.
+ *
+ * @param {Function} create - The effect function, optionally returning a cleanup function
+ * @param {Array<mixed> | void | null} deps - Optional dependency array
+ */
 export function useEffect(
   create: () => (() => void) | void,
   deps: Array<mixed> | void | null,
 ): void {
   if (__DEV__) {
-    if (create == null) {
-      console.warn(
-        'React Hook useEffect requires an effect callback. Did you forget to pass a callback to the hook?',
-      );
-    }
+    validateEffectCallback(create, 'useEffect');
+    validateHookCallContext('useEffect');
   }
 
   const dispatcher = resolveDispatcher();
   return dispatcher.useEffect(create, deps);
 }
 
+/**
+ * Similar to useLayoutEffect, but fires synchronously before all DOM mutations.
+ * Intended for CSS-in-JS libraries to inject styles before the browser repaints.
+ * This hook should not read layout information from the DOM.
+ *
+ * @param {Function} create - The effect function
+ * @param {Array<mixed> | void | null} deps - Optional dependency array
+ */
 export function useInsertionEffect(
   create: () => (() => void) | void,
   deps: Array<mixed> | void | null,
 ): void {
   if (__DEV__) {
-    if (create == null) {
-      console.warn(
-        'React Hook useInsertionEffect requires an effect callback. Did you forget to pass a callback to the hook?',
-      );
-    }
+    validateEffectCallback(create, 'useInsertionEffect');
   }
 
   const dispatcher = resolveDispatcher();
   return dispatcher.useInsertionEffect(create, deps);
 }
 
+/**
+ * Fires synchronously after all DOM mutations but before the browser paints.
+ * Use this for DOM measurements and synchronous re-renders. Prefer useEffect
+ * for side effects that don't need to block visual updates.
+ *
+ * @param {Function} create - The effect function, optionally returning a cleanup
+ * @param {Array<mixed> | void | null} deps - Optional dependency array
+ */
 export function useLayoutEffect(
   create: () => (() => void) | void,
   deps: Array<mixed> | void | null,
 ): void {
   if (__DEV__) {
-    if (create == null) {
-      console.warn(
-        'React Hook useLayoutEffect requires an effect callback. Did you forget to pass a callback to the hook?',
-      );
-    }
+    validateEffectCallback(create, 'useLayoutEffect');
   }
 
   const dispatcher = resolveDispatcher();
