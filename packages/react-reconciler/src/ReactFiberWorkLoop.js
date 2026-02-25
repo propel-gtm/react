@@ -1194,34 +1194,7 @@ export function performWorkOnRoot(
 
       // The render completed.
 
-      // Check if this render may have yielded to a concurrent event, and if so,
-      // confirm that any newly rendered stores are consistent.
-      // TODO: It's possible that even a concurrent render may never have yielded
-      // to the main thread, if it was fast enough, or if it expired. We could
-      // skip the consistency check in that case, too.
       const finishedWork: Fiber = (root.current.alternate: any);
-      if (
-        renderWasConcurrent &&
-        !isRenderConsistentWithExternalStores(finishedWork)
-      ) {
-        if (enableProfilerTimer && enableComponentPerformanceTrack) {
-          setCurrentTrackFromLanes(lanes);
-          logInconsistentRender(
-            renderStartTime,
-            renderEndTime,
-            workInProgressUpdateTask,
-          );
-          finalizeRender(lanes, renderEndTime);
-        }
-        // A store was mutated in an interleaved event. Render again,
-        // synchronously, to block further mutations.
-        exitStatus = renderRootSync(root, lanes, false);
-        // We assume the tree is now consistent because we didn't yield to any
-        // concurrent events.
-        renderWasConcurrent = false;
-        // Need to check the exit status again.
-        continue;
-      }
 
       // Check if something threw
       if (
