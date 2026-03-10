@@ -57,9 +57,20 @@ type ReadOptions = {|
   findSourceMapURL?: FindSourceMapURLCallback,
   debugChannel?: {onMessage: (message: string) => void},
   close?: boolean,
+  allowPartialStream?: boolean,
 |};
 
+function getReadOptions(options: ReadOptions | void) {
+  return {
+    allowPartialStream: options?.allowPartialStream === true,
+    close: options?.close === true,
+    debugChannel: __DEV__ ? options?.debugChannel : undefined,
+    findSourceMapURL: options?.findSourceMapURL,
+  };
+}
+
 function read<T>(source: Source, options: ReadOptions): Thenable<T> {
+  const readOptions = getReadOptions(options);
   const response = createResponse(
     source,
     null,
@@ -68,19 +79,19 @@ function read<T>(source: Source, options: ReadOptions): Thenable<T> {
     undefined,
     undefined,
     undefined,
-    false,
-    options !== undefined ? options.findSourceMapURL : undefined,
+    readOptions.allowPartialStream,
+    readOptions.findSourceMapURL,
     true,
     undefined,
-    __DEV__ && options !== undefined && options.debugChannel !== undefined
-      ? options.debugChannel.onMessage
+    __DEV__ && readOptions.debugChannel !== undefined
+      ? readOptions.debugChannel.onMessage
       : undefined,
   );
   const streamState = createStreamState(response, source);
   for (let i = 0; i < source.length; i++) {
     processBinaryChunk(response, streamState, source[i], 0);
   }
-  if (options !== undefined && options.close) {
+  if (readOptions.close) {
     close(response);
   }
   return getRoot(response);

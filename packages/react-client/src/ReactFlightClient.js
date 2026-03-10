@@ -1449,27 +1449,23 @@ function createLazyChunkWrapper<T>(
   return lazyType;
 }
 
+function createClosedResponseChunk(response: Response): SomeChunk<any> {
+  if (response._allowPartialStream) {
+    const chunk = createPendingChunk(response);
+    const haltedChunk: HaltedChunk<any> = (chunk: any);
+    haltedChunk.status = HALTED;
+    haltedChunk.value = null;
+    haltedChunk.reason = null;
+    return haltedChunk;
+  }
+  return createErrorChunk(response, response._closedReason);
+}
+
 function getChunk(response: Response, id: number): SomeChunk<any> {
   const chunks = response._chunks;
   let chunk = chunks.get(id);
   if (!chunk) {
-    if (response._closed) {
-      if (response._allowPartialStream) {
-        // For partial streams, chunks accessed after close should be HALTED
-        // (never resolve).
-        chunk = createPendingChunk(response);
-        const haltedChunk: HaltedChunk<any> = (chunk: any);
-        haltedChunk.status = HALTED;
-        haltedChunk.value = null;
-        haltedChunk.reason = null;
-      } else {
-        // We have already errored the response and we're not going to get
-        // anything more streaming in so this will immediately error.
-        chunk = createErrorChunk(response, response._closedReason);
-      }
-    } else {
-      chunk = createPendingChunk(response);
-    }
+    chunk = response._closed ? createClosedResponseChunk(response) : createPendingChunk(response);
     chunks.set(id, chunk);
   }
   return chunk;

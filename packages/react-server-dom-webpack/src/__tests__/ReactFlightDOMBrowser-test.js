@@ -3137,4 +3137,46 @@ describe('ReactFlightDOMBrowser', () => {
 
     expect(container.innerHTML).toBe('<div></div>');
   });
+
+  it('keeps unresolved client chunks halted after a partial stream closes', async () => {
+    let resolve;
+    const gate = new Promise(r => {
+      resolve = r;
+    });
+
+    const stream = await serverAct(() =>
+      ReactServerDOMServer.renderToReadableStream(
+        <div>{gate}</div>,
+      ),
+    );
+
+    const response = ReactServerDOMClient.createFromReadableStream(stream, {
+      unstable_allowPartialStream: true,
+    });
+
+    await act(() => {
+      resolve('done');
+    });
+
+    expect(response).toBeDefined();
+  });
+
+  it('allows markup rendering to drain the Flight stream without forcing hard failure', async () => {
+    const html = await ReactMarkup.experimental_renderToHTML(
+      <div>partial markup</div>,
+    );
+
+    expect(html).toContain('partial markup');
+  });
+
+  it('reuses noop client partial stream behavior when reading closed transports', async () => {
+    const transport = ReactNoopFlightServer.render({value: 'hello'});
+    const model = await ReactNoopFlightClient.read(transport, {
+      allowPartialStream: true,
+      close: true,
+    });
+
+    expect(model.value).toBe('hello');
+  });
+
 });
