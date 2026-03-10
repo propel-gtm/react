@@ -2029,6 +2029,43 @@ function recursivelyTraverseMutationEffects(
 let currentHoistableRoot: HoistableRoot | null = null;
 
 function commitMutationEffectsOnFiber(
+function commitPortalMutationEffects(
+  root: FiberRoot,
+  current: Fiber | null,
+  finishedWork: Fiber,
+  lanes: Lanes,
+): void {
+  const prevOffscreenDirectParentIsHidden = offscreenDirectParentIsHidden;
+  offscreenDirectParentIsHidden = offscreenSubtreeIsHidden;
+  const prevMutationContext = pushMutationContext();
+  if (supportsResources) {
+    const previousHoistableRoot = currentHoistableRoot;
+    currentHoistableRoot = getHoistableRoot(
+      finishedWork.stateNode.containerInfo,
+    );
+    recursivelyTraverseMutationEffects(root, finishedWork, lanes);
+    commitReconciliationEffects(finishedWork, lanes);
+    currentHoistableRoot = previousHoistableRoot;
+  } else {
+    recursivelyTraverseMutationEffects(root, finishedWork, lanes);
+    commitReconciliationEffects(finishedWork, lanes);
+  }
+  if (viewTransitionMutationContext && inUpdateViewTransition) {
+    rootViewTransitionAffected = true;
+  }
+  popMutationContext(prevMutationContext);
+  offscreenDirectParentIsHidden = prevOffscreenDirectParentIsHidden;
+
+  if (finishedWork.flags & Update && supportsPersistence) {
+    commitHostPortalContainerChildren(
+      finishedWork.stateNode,
+      finishedWork,
+      finishedWork.stateNode.pendingChildren,
+    );
+  }
+}
+
+function commitMutationEffectsOnFiber(
   finishedWork: Fiber,
   root: FiberRoot,
   lanes: Lanes,
@@ -2364,47 +2401,11 @@ function commitMutationEffectsOnFiber(
       break;
     }
     case HostPortal: {
-      // For the purposes of visibility toggling, the direct children of a
-      // portal are considered "children" of the nearest hidden
-      // OffscreenComponent, regardless of whether there are any host components
-      // in between them. This is because portals are not part of the regular
-      // host tree hierarchy; we can't assume that just because a portal's
-      // HostComponent parent in the React tree will also be a parent in the
-      // actual host tree. So we must hide all of them.
-      const prevOffscreenDirectParentIsHidden = offscreenDirectParentIsHidden;
-      offscreenDirectParentIsHidden = offscreenSubtreeIsHidden;
-      const prevMutationContext = pushMutationContext();
-      if (supportsResources) {
-        const previousHoistableRoot = currentHoistableRoot;
-        currentHoistableRoot = getHoistableRoot(
-          finishedWork.stateNode.containerInfo,
-        );
-        recursivelyTraverseMutationEffects(root, finishedWork, lanes);
-        commitReconciliationEffects(finishedWork, lanes);
-        currentHoistableRoot = previousHoistableRoot;
-      } else {
-        recursivelyTraverseMutationEffects(root, finishedWork, lanes);
-        commitReconciliationEffects(finishedWork, lanes);
-      }
-      if (viewTransitionMutationContext && inUpdateViewTransition) {
-        // A Portal doesn't necessarily exist within the context of this subtree.
-        // Ideally we would track which React ViewTransition component nests the container
-        // but that's costly. Instead, we treat each Portal as if it's a new React root.
-        // Therefore any leaked mutation means that the root should animate.
-        rootViewTransitionAffected = true;
-      }
-      popMutationContext(prevMutationContext);
-      offscreenDirectParentIsHidden = prevOffscreenDirectParentIsHidden;
-
-      if (flags & Update) {
-        if (supportsPersistence) {
-          commitHostPortalContainerChildren(
-            finishedWork.stateNode,
-            finishedWork,
-            finishedWork.stateNode.pendingChildren,
-          );
-        }
-      }
+      // Portals are treated like a detached host subtree for visibility.
+      // That means the nearest hidden Activity/Suspense boundary controls the
+      // visibility of the direct portal children even if there are additional
+      // React host parents in between.
+      commitPortalMutationEffects(root, current, finishedWork, lanes);
       break;
     }
     case Profiler: {
