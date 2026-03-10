@@ -779,10 +779,10 @@ function applyCompiledFunctions(
   }
 }
 
-function shouldSkipCompilation(
+function getCompilationSkipReason(
   program: NodePath<t.Program>,
   pass: CompilerPass,
-): boolean {
+): string | null {
   if (pass.opts.sources) {
     if (pass.filename === null) {
       const error = new CompilerError();
@@ -796,11 +796,11 @@ function shouldSkipCompilation(
         }),
       );
       handleError(error, pass, null);
-      return true;
+      return 'missing_filename';
     }
 
     if (!isFilePartOfSources(pass.opts.sources, pass.filename)) {
-      return true;
+      return 'outside_sources';
     }
   }
 
@@ -810,9 +810,16 @@ function shouldSkipCompilation(
       getReactCompilerRuntimeModule(pass.opts.target),
     )
   ) {
-    return true;
+    return 'already_compiled';
   }
-  return false;
+  return null;
+}
+
+function shouldSkipCompilation(
+  program: NodePath<t.Program>,
+  pass: CompilerPass,
+): boolean {
+  return getCompilationSkipReason(program, pass) !== null;
 }
 
 function getReactFunctionType(

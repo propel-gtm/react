@@ -713,13 +713,10 @@ export class Environment {
     }
   }
 
-  /**
-   * Record a single diagnostic or error detail on this environment.
-   * If the error is an Invariant, it is immediately thrown since invariants
-   * represent internal bugs that cannot be recovered from.
-   * Otherwise, the error is accumulated and optionally logged.
-   */
-  recordError(error: CompilerDiagnostic | CompilerErrorDetail): void {
+  #recordErrorImpl(
+    error: CompilerDiagnostic | CompilerErrorDetail,
+    logEvent: boolean,
+  ): void {
     if (error.category === ErrorCategory.Invariant) {
       const compilerError = new CompilerError();
       if (error instanceof CompilerDiagnostic) {
@@ -729,11 +726,30 @@ export class Environment {
       }
       throw compilerError;
     }
+
     if (error instanceof CompilerDiagnostic) {
       this.#errors.pushDiagnostic(error);
     } else {
       this.#errors.pushErrorDetail(error);
     }
+
+    if (logEvent && this.logger != null) {
+      this.logger.logEvent(this.filename, {
+        kind: 'CompileError',
+        detail: error,
+        fnLoc: null,
+      });
+    }
+  }
+
+  /**
+   * Record a single diagnostic or error detail on this environment.
+   * If the error is an Invariant, it is immediately thrown since invariants
+   * represent internal bugs that cannot be recovered from.
+   * Otherwise, the error is accumulated and optionally logged.
+   */
+  recordError(error: CompilerDiagnostic | CompilerErrorDetail): void {
+    this.#recordErrorImpl(error, false);
   }
 
   /**
@@ -741,7 +757,7 @@ export class Environment {
    */
   recordErrors(error: CompilerError): void {
     for (const detail of error.details) {
-      this.recordError(detail);
+      this.#recordErrorImpl(detail, true);
     }
   }
 
