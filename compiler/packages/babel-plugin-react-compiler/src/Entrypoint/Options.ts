@@ -321,83 +321,81 @@ export const defaultOptions: ParsedPluginOptions = {
   target: '19',
 };
 
+function normalizePluginOptionValue(value: unknown): unknown {
+  return typeof value === 'string' ? value.toLowerCase() : value;
+}
+
+function parseSchemaOption<T>(
+  value: unknown,
+  schema: z.ZodType<T>,
+  reason: string,
+): T {
+  const result = schema.safeParse(value);
+  if (result.success) {
+    return result.data;
+  }
+  CompilerError.throwInvalidConfig({
+    reason,
+    description: `${fromZodError(result.error)}`,
+    loc: null,
+    suggestions: null,
+  });
+}
+
+function parseCompilerOption(
+  key: keyof PluginOptions,
+  value: unknown,
+): unknown {
+  switch (key) {
+    case 'environment': {
+      const environmentResult = parseEnvironmentConfig(value);
+      if (environmentResult.isErr()) {
+        CompilerError.throwInvalidConfig({
+          reason:
+            'Error in validating environment config. This is an advanced setting and not meant to be used directly',
+          description: environmentResult.unwrapErr().toString(),
+          suggestions: null,
+          loc: null,
+        });
+      }
+      return environmentResult.unwrap();
+    }
+    case 'target':
+      return parseTargetConfig(value);
+    case 'gating':
+      return value == null ? null : tryParseExternalFunction(value);
+    case 'dynamicGating':
+      return value == null
+        ? null
+        : parseSchemaOption(
+            value,
+            DynamicGatingOptionsSchema,
+            'Could not parse dynamic gating. Update React Compiler config to fix the error',
+          );
+    case 'customOptOutDirectives':
+      return parseSchemaOption(
+        value,
+        CustomOptOutDirectiveSchema,
+        'Could not parse custom opt out directives. Update React Compiler config to fix the error',
+      );
+    default:
+      return value;
+  }
+}
+
 export function parsePluginOptions(obj: unknown): ParsedPluginOptions {
   if (obj == null || typeof obj !== 'object') {
     return defaultOptions;
   }
+
   const parsedOptions = Object.create(null);
-  for (let [key, value] of Object.entries(obj)) {
-    if (typeof value === 'string') {
-      // normalize string configs to be case insensitive
-      value = value.toLowerCase();
+  for (const [rawKey, rawValue] of Object.entries(obj)) {
+    if (!isCompilerFlag(rawKey)) {
+      continue;
     }
-    if (isCompilerFlag(key)) {
-      switch (key) {
-        case 'environment': {
-          const environmentResult = parseEnvironmentConfig(value);
-          if (environmentResult.isErr()) {
-            CompilerError.throwInvalidConfig({
-              reason:
-                'Error in validating environment config. This is an advanced setting and not meant to be used directly',
-              description: environmentResult.unwrapErr().toString(),
-              suggestions: null,
-              loc: null,
-            });
-          }
-          parsedOptions[key] = environmentResult.unwrap();
-          break;
-        }
-        case 'target': {
-          parsedOptions[key] = parseTargetConfig(value);
-          break;
-        }
-        case 'gating': {
-          if (value == null) {
-            parsedOptions[key] = null;
-          } else {
-            parsedOptions[key] = tryParseExternalFunction(value);
-          }
-          break;
-        }
-        case 'dynamicGating': {
-          if (value == null) {
-            parsedOptions[key] = null;
-          } else {
-            const result = DynamicGatingOptionsSchema.safeParse(value);
-            if (result.success) {
-              parsedOptions[key] = result.data;
-            } else {
-              CompilerError.throwInvalidConfig({
-                reason:
-                  'Could not parse dynamic gating. Update React Compiler config to fix the error',
-                description: `${fromZodError(result.error)}`,
-                loc: null,
-                suggestions: null,
-              });
-            }
-          }
-          break;
-        }
-        case 'customOptOutDirectives': {
-          const result = CustomOptOutDirectiveSchema.safeParse(value);
-          if (result.success) {
-            parsedOptions[key] = result.data;
-          } else {
-            CompilerError.throwInvalidConfig({
-              reason:
-                'Could not parse custom opt out directives. Update React Compiler config to fix the error',
-              description: `${fromZodError(result.error)}`,
-              loc: null,
-              suggestions: null,
-            });
-          }
-          break;
-        }
-        default: {
-          parsedOptions[key] = value;
-        }
-      }
-    }
+    const key: keyof PluginOptions = rawKey;
+    const value = normalizePluginOptionValue(rawValue);
+    parsedOptions[key] = parseCompilerOption(key, value);
   }
   return {...defaultOptions, ...parsedOptions};
 }
