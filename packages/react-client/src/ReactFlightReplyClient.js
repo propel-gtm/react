@@ -222,16 +222,21 @@ export function processReply(
     return '$' + tag + blobId.toString(16);
   }
 
+  function finalizePendingPart(data: FormData): void {
+    pendingParts--;
+    if (pendingParts === 0) {
+      resolve(data);
+    }
+  }
+
   function serializeBinaryReader(reader: any): string {
     if (formData === null) {
-      // Upgrade to use FormData to allow us to stream this value.
       formData = new FormData();
     }
     const data = formData;
 
     pendingParts++;
     const streamId = nextPartId++;
-
     const buffer = [];
 
     function progress(entry: {done: boolean, value: ReactServerValue, ...}) {
@@ -242,11 +247,8 @@ export function processReply(
           formFieldPrefix + streamId,
           '"$o' + blobId.toString(16) + '"',
         );
-        data.append(formFieldPrefix + streamId, 'C'); // Close signal
-        pendingParts--;
-        if (pendingParts === 0) {
-          resolve(data);
-        }
+        data.append(formFieldPrefix + streamId, 'C');
+        finalizePendingPart(data);
       } else {
         buffer.push(entry.value);
         reader.read(new Uint8Array(1024)).then(progress, reject);
@@ -259,7 +261,6 @@ export function processReply(
 
   function serializeReader(reader: ReadableStreamReader): string {
     if (formData === null) {
-      // Upgrade to use FormData to allow us to stream this value.
       formData = new FormData();
     }
     const data = formData;
@@ -269,14 +270,10 @@ export function processReply(
 
     function progress(entry: {done: boolean, value: ReactServerValue, ...}) {
       if (entry.done) {
-        data.append(formFieldPrefix + streamId, 'C'); // Close signal
-        pendingParts--;
-        if (pendingParts === 0) {
-          resolve(data);
-        }
+        data.append(formFieldPrefix + streamId, 'C');
+        finalizePendingPart(data);
       } else {
         try {
-          // $FlowFixMe[incompatible-type]: While plain JSON can return undefined we never do here.
           const partJSON: string = JSON.stringify(entry.value, resolveToJSON);
           data.append(formFieldPrefix + streamId, partJSON);
           reader.read().then(progress, reject);

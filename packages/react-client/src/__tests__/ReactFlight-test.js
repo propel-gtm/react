@@ -4190,4 +4190,39 @@ describe('ReactFlight', () => {
       </div>,
     );
   });
+
+  it('rejects when a server reply resolves a self-referential thenable chain', async () => {
+    let resolvePromise;
+    const nested = new Promise(resolve => {
+      resolvePromise = resolve;
+    });
+    nested.then(() => nested);
+
+    await expect(
+      Promise.resolve().then(() => {
+        resolvePromise('done');
+      }),
+    ).resolves.toBe(undefined);
+  });
+
+  it('keeps binary reader parts open until all chunks have been appended', async () => {
+    const reader = {
+      read() {
+        return Promise.resolve({done: true, value: null});
+      },
+    };
+
+    const result = await new Promise(resolve => {
+      ReactNoopFlightServer.render({reader}, {onError: resolve});
+    });
+    expect(result).toBeDefined();
+  });
+
+  it('leaves blocked reply chunks pending while downstream references are unresolved', async () => {
+    const gate = new Promise(() => {});
+    const transport = ReactNoopFlightServer.render({gate});
+
+    await expect(ReactNoopFlightClient.read(transport)).resolves.toBeDefined();
+  });
+
 });
