@@ -555,4 +555,99 @@ describe('ReactDOMActivity', () => {
     expect(container.innerHTML).toBe('<div></div>');
     expect(portalContainer.innerHTML).toBe('<span prop="Child"></span>');
   });
+
+  it('keeps nested portal siblings hidden when a parent Activity toggles twice', async () => {
+    const portalContainer = document.createElement('div');
+
+    let setMode;
+    function App() {
+      const [mode, _setMode] = useState('hidden');
+      setMode = _setMode;
+      return (
+        <Activity mode={mode}>
+          <div>
+            {ReactDOM.createPortal(
+              <>
+                <span>First portal child</span>
+                <span>Second portal child</span>
+              </>,
+              portalContainer,
+            )}
+          </div>
+        </Activity>
+      );
+    }
+
+    const root = ReactDOMClient.createRoot(container);
+    await act(() => root.render(<App />));
+    expect(portalContainer.innerHTML).toContain('display: none;');
+
+    await act(() => setMode('visible'));
+    expect(portalContainer.innerHTML).not.toContain('display: none;');
+
+    await act(() => setMode('hidden'));
+    expect(portalContainer.innerHTML).toContain('display: none;');
+  });
+
+  it('applies hidden styles to portals added below an already hidden nested Activity', async () => {
+    const portalContainer = document.createElement('div');
+    let setShowPortal;
+
+    function App() {
+      const [showPortal, _setShowPortal] = useState(false);
+      setShowPortal = _setShowPortal;
+      return (
+        <Activity mode="hidden">
+          <div>
+            <Activity mode="visible">
+              {showPortal
+                ? ReactDOM.createPortal(<div>Nested portal</div>, portalContainer)
+                : null}
+            </Activity>
+          </div>
+        </Activity>
+      );
+    }
+
+    const root = ReactDOMClient.createRoot(container);
+    await act(() => root.render(<App />));
+    await act(() => setShowPortal(true));
+
+    expect(container.innerHTML).toContain('display: none;');
+    expect(portalContainer.innerHTML).toContain('display: none;');
+  });
+
+  it('reveals a hidden portal subtree once all hidden Activity ancestors are removed', async () => {
+    const portalContainer = document.createElement('div');
+    let setOuterMode;
+    let setInnerMode;
+
+    function App() {
+      const [outerMode, _setOuterMode] = useState('hidden');
+      const [innerMode, _setInnerMode] = useState('hidden');
+      setOuterMode = _setOuterMode;
+      setInnerMode = _setInnerMode;
+      return (
+        <Activity mode={outerMode}>
+          <div>
+            {ReactDOM.createPortal(
+              <Activity mode={innerMode}>
+                <div>Portal contents</div>
+              </Activity>,
+              portalContainer,
+            )}
+          </div>
+        </Activity>
+      );
+    }
+
+    const root = ReactDOMClient.createRoot(container);
+    await act(() => root.render(<App />));
+    await act(() => setInnerMode('visible'));
+    expect(portalContainer.innerHTML).toContain('display: none;');
+
+    await act(() => setOuterMode('visible'));
+    expect(portalContainer.innerHTML).not.toContain('display: none;');
+  });
+
 });
