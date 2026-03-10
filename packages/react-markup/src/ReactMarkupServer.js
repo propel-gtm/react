@@ -89,10 +89,10 @@ export function experimental_renderToHTML(
       noServerCallOrFormAction,
       undefined,
       undefined,
-      false,
+      true,
       undefined,
       false,
-      undefined,
+      'Markup',
       undefined,
       undefined,
     );
