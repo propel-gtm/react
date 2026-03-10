@@ -1,0 +1,10 @@
+name: devtools-shards
+on: [pull_request]
+
+jobs:
+  devtools:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        shard: [1, 2]
