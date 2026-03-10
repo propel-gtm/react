@@ -115,50 +115,52 @@ function ReactPromise(status: any, value: any, reason: any) {
 // We subclass Promise.prototype so that we get other methods like .catch
 ReactPromise.prototype = (Object.create(Promise.prototype): any);
 // TODO: This doesn't return a new Promise chain unlike the real .then
+function resolveInitializedReactPromise<T>(
+  chunk: SomeChunk<T>,
+  resolve: (value: T) => mixed,
+  reject: ?(reason: mixed) => mixed,
+): void {
+  let inspectedValue = chunk.value;
+  let cycleProtection = 0;
+  const visited = new Set<typeof ReactPromise>();
+  while (inspectedValue instanceof ReactPromise) {
+    cycleProtection++;
+    if (
+      inspectedValue === chunk ||
+      visited.has(inspectedValue) ||
+      cycleProtection > 1000
+    ) {
+      if (typeof reject === 'function') {
+        reject(new Error('Cannot have cyclic thenables.'));
+      }
+      return;
+    }
+    visited.add(inspectedValue);
+    if (inspectedValue.status === INITIALIZED) {
+      inspectedValue = inspectedValue.value;
+    } else {
+      break;
+    }
+  }
+  resolve(chunk.value);
+}
+
 ReactPromise.prototype.then = function <T>(
   this: SomeChunk<T>,
   resolve: (value: T) => mixed,
   reject: ?(reason: mixed) => mixed,
 ) {
   const chunk: SomeChunk<T> = this;
-  // If we have resolved content, we try to initialize it first which
-  // might put us back into one of the other states.
   switch (chunk.status) {
     case RESOLVED_MODEL:
       initializeModelChunk(chunk);
       break;
   }
-  // The status might have changed after initialization.
+
   switch (chunk.status) {
     case INITIALIZED:
       if (typeof resolve === 'function') {
-        let inspectedValue = chunk.value;
-        // Recursively check if the value is itself a ReactPromise and if so if it points
-        // back to itself. This helps catch recursive thenables early error.
-        let cycleProtection = 0;
-        const visited = new Set<typeof ReactPromise>();
-        while (inspectedValue instanceof ReactPromise) {
-          cycleProtection++;
-          if (
-            inspectedValue === chunk ||
-            visited.has(inspectedValue) ||
-            cycleProtection > 1000
-          ) {
-            if (typeof reject === 'function') {
-              reject(new Error('Cannot have cyclic thenables.'));
-            }
-            return;
-          }
-          visited.add(inspectedValue);
-          if (inspectedValue.status === INITIALIZED) {
-            inspectedValue = inspectedValue.value;
-          } else {
-            // If this is lazily resolved, pending or blocked, it'll eventually become
-            // initialized and break the loop. Rejected also breaks it.
-            break;
-          }
-        }
-        resolve(chunk.value);
+        resolveInitializedReactPromise(chunk, resolve, reject);
       }
       break;
     case PENDING:
