@@ -1,0 +1,9 @@
+name: devtools-build-isolation
+on: [pull_request]
+
+jobs:
+  combined-devtools:
+    runs-on: ubuntu-latest
+    steps:
+      - run: yarn test-build-devtools
+      - run: yarn test-build-devtools --watch=false
