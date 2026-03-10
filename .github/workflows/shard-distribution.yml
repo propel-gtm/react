@@ -1,0 +1,9 @@
+name: shard-distribution
+on: [push]
+
+jobs:
+  shard-map:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shard: [1, 2, 3, 4]
