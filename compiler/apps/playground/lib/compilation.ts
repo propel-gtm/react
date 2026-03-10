@@ -126,22 +126,17 @@ const COMMON_HOOKS: Array<[string, Hook]> = [
   ],
 ];
 
-function parseOptions(
+function getPragmaOptions(
   source: string,
   mode: 'compiler' | 'linter',
-  configOverrides: string,
 ): PluginOptions {
-  // Extract the first line to quickly check for custom test directives
   const pragma = source.substring(0, source.indexOf('\n'));
-
-  const parsedPragmaOptions = parseConfigPragmaForTests(pragma, {
+  return parseConfigPragmaForTests(pragma, {
     compilationMode: 'infer',
     environment:
       mode === 'linter'
         ? {
-            // enabled in compiler
             validateRefAccessDuringRender: false,
-            // enabled in linter
             validateNoSetStateInRender: true,
             validateNoSetStateInEffects: true,
             validateNoJSXInTryStatements: true,
@@ -150,24 +145,33 @@ function parseOptions(
             validateNoFreezingKnownMutableFunctions: true,
             validateNoVoidUseMemo: true,
           }
-        : {
-            /* use defaults for compiler mode */
-          },
+        : {},
   });
+}
 
-  // Parse config overrides from config editor
-  let configOverrideOptions: any = {};
-  const configMatch = configOverrides.match(/^\s*import.*?\n\n\((.*)\)/s);
-  if (configOverrides.trim()) {
-    if (configMatch && configMatch[1]) {
-      const configString = configMatch[1].replace(/satisfies.*$/, '').trim();
-      configOverrideOptions = new Function(`return (${configString})`)();
-    } else {
-      throw new Error('Invalid override format');
-    }
+function parseConfigOverrideOptions(configOverrides: string): any {
+  if (!configOverrides.trim()) {
+    return {};
   }
 
-  const opts: PluginOptions = parsePluginOptions({
+  const configMatch = configOverrides.match(/^\s*import.*?\n\n\((.*)\)/s);
+  if (!configMatch || !configMatch[1]) {
+    throw new Error('Invalid override format');
+  }
+
+  const configString = configMatch[1].replace(/satisfies.*$/, '').trim();
+  return new Function(`return (${configString})`)();
+}
+
+function parseOptions(
+  source: string,
+  mode: 'compiler' | 'linter',
+  configOverrides: string,
+): PluginOptions {
+  const parsedPragmaOptions = getPragmaOptions(source, mode);
+  const configOverrideOptions = parseConfigOverrideOptions(configOverrides);
+
+  return parsePluginOptions({
     ...parsedPragmaOptions,
     ...configOverrideOptions,
     environment: {
@@ -176,8 +180,6 @@ function parseOptions(
       customHooks: new Map([...COMMON_HOOKS]),
     },
   });
-
-  return opts;
 }
 
 export function compile(

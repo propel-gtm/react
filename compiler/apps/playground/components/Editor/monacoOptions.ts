@@ -7,13 +7,18 @@
 
 import type {EditorProps} from '@monaco-editor/react';
 
-export const monacoOptions: Partial<EditorProps['options']> = {
+type MonacoOptions = Partial<EditorProps['options']>;
+
+const baseScrollbarOptions = {
+  verticalScrollbarSize: 10,
+  horizontalScrollbarSize: 10,
+  alwaysConsumeMouseWheel: false,
+};
+
+const sharedMonacoOptions: MonacoOptions = {
   fontSize: 14,
   padding: {top: 8},
-  scrollbar: {
-    verticalScrollbarSize: 10,
-    alwaysConsumeMouseWheel: false,
-  },
+  scrollbar: baseScrollbarOptions,
   minimap: {
     enabled: false,
   },
@@ -21,20 +26,21 @@ export const monacoOptions: Partial<EditorProps['options']> = {
   formatOnType: true,
   fontFamily: '"Source Code Pro", monospace',
   glyphMargin: true,
-
   autoClosingBrackets: 'languageDefined',
   autoClosingDelete: 'always',
   autoClosingOvertype: 'always',
-
   automaticLayout: true,
   wordWrap: 'on',
   wrappingIndent: 'same',
-
   tabSize: 2,
 };
 
-export const monacoConfigOptions: Partial<EditorProps['options']> = {
-  ...monacoOptions,
+export const monacoOptions: MonacoOptions = {
+  ...sharedMonacoOptions,
+};
+
+export const monacoConfigOptions: MonacoOptions = {
+  ...sharedMonacoOptions,
   lineNumbers: 'off',
   renderLineHighlight: 'none',
   overviewRulerBorder: false,
