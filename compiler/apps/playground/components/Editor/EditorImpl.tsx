@@ -17,6 +17,39 @@ import {CompilerOutput, default as Output} from './Output';
 import {compile} from '../../lib/compilation';
 import prettyFormat from 'pretty-format';
 
+function mergeCompilerOutputs(
+  compilerOutput: CompilerOutput,
+  linterOutput: CompilerOutput,
+): [CompilerOutput, Array<CompilerErrorDetail | CompilerDiagnostic>] {
+  if (compilerOutput.kind === 'ok') {
+    const errors = linterOutput.kind === 'ok' ? [] : linterOutput.error.details;
+    return [
+      {
+        ...compilerOutput,
+        errors,
+      },
+      errors,
+    ];
+  }
+
+  return [compilerOutput, compilerOutput.error.details];
+}
+
+function formatAppliedConfig(
+  appliedOptions: unknown,
+  previousValue: string,
+): string {
+  if (appliedOptions == null) {
+    return previousValue;
+  }
+
+  const formatted = prettyFormat(appliedOptions, {
+    printFunctionName: false,
+    printBasicPrototype: false,
+  });
+  return formatted === previousValue ? previousValue : formatted;
+}
+
 export default function Editor(): JSX.Element {
   const store = useStore();
   const deferredStore = useDeferredValue(store);
@@ -30,40 +63,28 @@ export default function Editor(): JSX.Element {
   );
   const [formattedAppliedConfig, setFormattedAppliedConfig] = useState('');
 
-  let mergedOutput: CompilerOutput;
-  let errors: Array<CompilerErrorDetail | CompilerDiagnostic>;
-  if (compilerOutput.kind === 'ok') {
-    errors = linterOutput.kind === 'ok' ? [] : linterOutput.error.details;
-    mergedOutput = {
-      ...compilerOutput,
-      errors,
-    };
-  } else {
-    mergedOutput = compilerOutput;
-    errors = compilerOutput.error.details;
-  }
+  const [mergedOutput, errors] = useMemo(
+    () => mergeCompilerOutputs(compilerOutput, linterOutput),
+    [compilerOutput, linterOutput],
+  );
 
-  if (appliedOptions) {
-    const formatted = prettyFormat(appliedOptions, {
-      printFunctionName: false,
-      printBasicPrototype: false,
-    });
-    if (formatted !== formattedAppliedConfig) {
-      setFormattedAppliedConfig(formatted);
-    }
+  const nextFormattedAppliedConfig = useMemo(
+    () => formatAppliedConfig(appliedOptions, formattedAppliedConfig),
+    [appliedOptions, formattedAppliedConfig],
+  );
+  if (nextFormattedAppliedConfig !== formattedAppliedConfig) {
+    setFormattedAppliedConfig(nextFormattedAppliedConfig);
   }
 
   return (
-    <>
-      <div className="relative flex top-14">
-        <div className="flex-shrink-0">
-          <ConfigEditor formattedAppliedConfig={formattedAppliedConfig} />
-        </div>
-        <div className="flex flex-1 min-w-0">
-          <Input language={language} errors={errors} />
-          <Output store={deferredStore} compilerOutput={mergedOutput} />
-        </div>
+    <div className="relative flex top-14">
+      <div className="flex-shrink-0">
+        <ConfigEditor formattedAppliedConfig={formattedAppliedConfig} />
       </div>
-    </>
+      <div className="flex flex-1 min-w-0">
+        <Input language={language} errors={errors} />
+        <Output store={deferredStore} compilerOutput={mergedOutput} />
+      </div>
+    </div>
   );
 }

@@ -71,6 +71,25 @@ export default function ConfigEditor({
   );
 }
 
+function registerCompilerTypes(monaco: Monaco): void {
+  monaco.languages.typescript.typescriptDefaults.addExtraLib(
+    //@ts-expect-error - compilerTypeDefs is a string
+    compilerTypeDefs,
+    'file:///node_modules/babel-plugin-react-compiler/dist/index.d.ts',
+  );
+  monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
+    target: monaco.languages.typescript.ScriptTarget.Latest,
+    allowNonTsExtensions: true,
+    moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+    module: monaco.languages.typescript.ModuleKind.ESNext,
+    noEmit: true,
+    strict: false,
+    esModuleInterop: true,
+    allowSyntheticDefaultImports: true,
+    jsx: monaco.languages.typescript.JsxEmit.React,
+  });
+}
+
 function ExpandedEditor({
   onToggle,
   formattedAppliedConfig,
@@ -85,7 +104,9 @@ function ExpandedEditor({
   const handleChange: (value: string | undefined) => void = (
     value: string | undefined,
   ) => {
-    if (value === undefined) return;
+    if (value === undefined) {
+      return;
+    }
 
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -98,37 +119,19 @@ function ExpandedEditor({
           config: value,
         },
       });
-    }, 500); // 500ms debounce delay
+    }, 500);
   };
 
   const handleMount: (
     _: editor.IStandaloneCodeEditor,
     monaco: Monaco,
   ) => void = (_, monaco) => {
-    // Add the babel-plugin-react-compiler type definitions to Monaco
-    monaco.languages.typescript.typescriptDefaults.addExtraLib(
-      //@ts-expect-error - compilerTypeDefs is a string
-      compilerTypeDefs,
-      'file:///node_modules/babel-plugin-react-compiler/dist/index.d.ts',
-    );
-    monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
-      target: monaco.languages.typescript.ScriptTarget.Latest,
-      allowNonTsExtensions: true,
-      moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
-      module: monaco.languages.typescript.ModuleKind.ESNext,
-      noEmit: true,
-      strict: false,
-      esModuleInterop: true,
-      allowSyntheticDefaultImports: true,
-      jsx: monaco.languages.typescript.JsxEmit.React,
-    });
+    registerCompilerTypes(monaco);
   };
 
   return (
     <ViewTransition
       update={{[CONFIG_PANEL_TRANSITION]: 'slide-in', default: 'none'}}>
-      {/* enter={{[CONFIG_PANEL_TRANSITION]: 'slide-in', default: 'none'}}
-      exit={{[CONFIG_PANEL_TRANSITION]: 'slide-out', default: 'none'}}> */}
       <Resizable
         minWidth={300}
         maxWidth={600}
